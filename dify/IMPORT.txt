@@ -1,0 +1,89 @@
+步骤一 Dify 工作流 · 导入说明
+================================
+
+1) 文件
+   - step1-topic-evaluation.dsl.yml  工作流 DSL（推荐在 Dify Studio 中「导入 DSL」）
+   - step1-llm-prompt.zh.txt           LLM 系统/用户提示词备份（手动建流时使用）
+
+2) 与前端对齐（必须一致）
+   - API 输入 key：train_target, target_job_info, target_job_duty, train_goal, topic_name, course_duration
+     （见 src/services/dify/step1-parse.ts 中 buildStep1WorkflowInputs）
+   - 工作流结束输出变量名：step1_result（字符串 = 一整段 JSON）
+     （见 parseStep1Outputs 对 step1_result / result 等的解析）
+
+3) 导入后整页白屏 / Application error（客户端异常）
+   - 常见原因：DSL 里 LLM 节点缺少 context、vision 等字段，与当前 Dify 前端期望不一致。
+     请使用仓库最新版 step1-topic-evaluation.dsl.yml（已对齐 0.6.x 结构）。
+   - 版本号须为字符串：version: "0.6.0"，勿写成纯数字（否则后端可能报 Invalid version type）。
+
+4) 导入失败时
+   - 不同租户/版本的 Dify 可能对 graph 节点 schema 校验不同；可在 Studio 新建「工作流」，
+     手动添加：开始（6 个段落变量，variable 用上面 snake_case）→ LLM → 结束。
+   - 结束节点增加输出变量 step1_result，取值来自 LLM 节点的文本输出（text）。
+   - LLM 的变量引用若 {{#start.xxx#}} 报错，请改为你在画布中为「开始」节点看到的引用占位符。
+
+5) 发布与密钥
+   - 编排保存后点击「发布」，在「API 访问」中创建 API Key，填入前端环境变量：
+     VITE_DIFY_STEP1_API_KEY=app-xxxx
+     VITE_DIFY_STEP1_APP_MODE=workflow
+
+6) 安全
+   - 生产环境勿长期把 API Key 写在前端；应改为后端代理调用 Dify。
+
+================================
+步骤二 · 课程分析（两个工作流）
+================================
+
+字段来源（与 CourseAnalysisInputPanel / AnalysisFormData 一致，API 用 snake_case）：
+  topic_name, need_background, business_analysis, task_analysis,
+  required_ability, ability_gap, current_ability,
+  learning_motivation, learning_style, past_learning_effect
+
+1) step2-01-course-analysis-evaluation.dsl.yml — 「生成课程分析评估」
+   - 输入：上述 10 个变量（与左侧表单一一对应）。
+   - 输出变量名：step2_evaluation_report — 字符串，Markdown 报告正文（供右侧 CourseAnalysisOutputPanel 展示/编辑）。
+   - 在 Dify 中单独建应用、发布，使用独立 API Key（如 VITE_DIFY_STEP2A_API_KEY）。
+
+2) step2-02-learner-goals-design.dsl.yml — 「学员画像 + 课程目标 + 设计思路」
+   - 输入：evaluation_report（步骤二-A 的完整报告）+ 同上 10 个课题分析字段（便于模型对齐上下文）。
+   - 输出变量名：step2_structured_result — 字符串，内容为 JSON，字段：
+     learnerPortrait, courseGoals.knowledge/skill/attitude[], designApproach
+     （与 CourseAnalysisResultEditor 的 ResultData 一致，便于前端 JSON.parse）。
+   - 单独建应用、发布，API Key（如 VITE_DIFY_STEP2B_API_KEY）。
+
+3) 调用顺序
+   - 先跑工作流 A，拿到 step2_evaluation_report；
+   - 将报告字符串作为 evaluation_report，与其余字段一并 POST 到工作流 B。
+
+4) 手搓与排错
+   - 见 step2-llm-prompt-backup.zh.txt；导入失败时的处理同步骤一 IMPORT 第 4 节。
+
+================================
+步骤三 · 课程大纲（CourseOutlineEditor）
+================================
+
+1) step3-01-four-level-outline.dsl.yml
+   - 输入：course_name, course_duration, learner_portrait,
+     course_goals_knowledge, course_goals_skill, course_goals_attitude, design_approach
+     （与 buildStep3WorkflowInputs 一致，数据来自第二步结构化结果 + 课程名称/时长）
+   - 输出变量名：step3_outline_json — 字符串，JSON 结构见 step3-parse.ts 中 Step3OutlineDoc；
+     前端用 renderStep3OutlineDocumentHtml 转为与页面 INITIAL_HTML 一致的 <p style="..."> 片段。
+   - 环境变量：VITE_DIFY_STEP3_API_KEY；可选 VITE_DIFY_STEP3_USER_ID（默认 course-create-step3）
+
+2) 未配置 Key 时，第三步仍使用内置示例课程大纲，不调用接口。
+
+================================
+步骤四 · 课件 PPT 三级大纲（素材匹配页）
+================================
+
+1) step4-01-ppt-three-level-outline.dsl.yml
+   - 输入：course_name, learner_portrait, course_goals_knowledge, course_goals_skill,
+     course_goals_attitude, design_approach（与 buildStep4WorkflowInputs 一致）
+   - 输出变量名：step4_ppt_outline — 字符串，JSON：{ "slides": [ { title, contentLines, subItems? } ] }
+   - 前端：src/services/dify/step4-parse.ts / step4PptOutline.ts → MaterialMatchingEditor
+
+2) 环境变量
+   - VITE_DIFY_STEP4_API_KEY（独立应用密钥）
+   - 可选 VITE_DIFY_STEP4_USER_ID（默认 course-create-step4）
+
+3) 未配置 Key 时，素材匹配页使用内置示例幻灯片列表，不调用接口。

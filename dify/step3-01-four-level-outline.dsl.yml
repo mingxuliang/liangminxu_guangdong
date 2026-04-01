@@ -1,0 +1,230 @@
+# =============================================================================
+# Dify 工作流 DSL · 步骤三「课程大纲」Word 式文档
+# -----------------------------------------------------------------------------
+# 输入：课程名称、课时时长、学员画像、三维课程目标、设计思路（与第二步结构化结果对齐）
+# 输出：step3_outline_json — JSON 字符串，由前端渲染为与 CourseOutlineEditor 一致的 HTML
+# =============================================================================
+
+version: "0.6.0"
+kind: app
+app:
+  name: 步骤三-课程大纲
+  description: 依据第二步产出生成「一～五、六课程大纲」结构化 JSON（四级层级），对齐前端页面版式
+  icon_type: emoji
+  icon: '📑'
+  icon_background: '#E0E7FF'
+  mode: workflow
+  use_icon_as_answer_icon: false
+
+dependencies: []
+
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features: {}
+
+  graph:
+    nodes:
+      - id: start
+        type: custom
+        position:
+          x: 80
+          y: 140
+        positionAbsolute:
+          x: 80
+          y: 140
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: start
+          title: 开始
+          desc: ''
+          variables:
+            - variable: course_name
+              label: 课程名称
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: course_duration
+              label: 课程时长（如 6课时 / 6小时）
+              type: paragraph
+              required: false
+              max_length: 256
+            - variable: learner_portrait
+              label: 学员画像
+              type: paragraph
+              required: false
+              max_length: 65536
+            - variable: course_goals_knowledge
+              label: 知识目标
+              type: paragraph
+              required: false
+              max_length: 65536
+            - variable: course_goals_skill
+              label: 技能目标
+              type: paragraph
+              required: false
+              max_length: 65536
+            - variable: course_goals_attitude
+              label: 态度目标
+              type: paragraph
+              required: false
+              max_length: 65536
+            - variable: design_approach
+              label: 课程设计解决思路
+              type: paragraph
+              required: false
+              max_length: 65536
+
+      - id: llm_outline
+        type: custom
+        position:
+          x: 400
+          y: 140
+        positionAbsolute:
+          x: 400
+          y: 140
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: llm
+          title: 课程大纲 JSON
+          desc: 仅输出一个 JSON 对象，勿用 Markdown 代码围栏
+          model:
+            provider: ''
+            name: ''
+            mode: chat
+            completion_params:
+              temperature: 0.25
+              max_tokens: 8192
+          context:
+            enabled: false
+            variable_selector: []
+          vision:
+            enabled: false
+          prompt_template:
+            - role: system
+              edition_type: basic
+              text: |-
+                你是企业培训课程设计专家。请根据课程名称、课时时长、学员画像、三维课程目标与教学设计思路，输出且仅输出一个合法 JSON 对象（不要 Markdown、不要 ``` 代码块）。
+
+                文档逻辑须覆盖以下块（前端将按固定样式排版）：
+                - courseTitle：与课程名称一致或略润色。
+                - background：一、【课程背景】用一段话（可含行业/痛点/培训必要性）。
+                - benefits：二、【课程收益】多条，与知识/技能/态度目标呼应，可量化。
+                - teachingForm：三、【教学形式】，如「面授课程」「线上+面授混合」等。
+                - businessGoals：四、【业务目标】多条，与课程收益区分偏业务结果。
+                - durationText：五、【课程时长】展示文案，须与输入课时时长一致或换算为「X小时」。
+                - introOutline：课程大纲前导论标题，一般为「导论」。
+                - introDetailLine：可选，导论下一条案例导入/问题导入（含建议时长如「（0.5小时）」）。
+                - modules：六、【课程大纲】主体。四级层级含义：
+                  * moduleTitle：一级模块，编号如「1. xxx（1小时）」；
+                  * sectionTitle：二级节，如「1.1. xxx」；
+                  * subsectionTitle：三级知识点标题，如「1.1.1. xxx」；
+                  * detailLines：四级要点/活动/工具说明，多条字符串，不用再加编号前缀。
+
+                要求至少 3 个模块；每模块含若干节；每节含若干三级标题；detailLines 可多条。总学时分配与 course_duration 大致匹配。
+                编号须连续、层级清晰，符合「1. → 1.1. → 1.1.1. → 要点」习惯。
+
+                JSON 结构示例（字段名必须一致）：
+                {
+                  "courseTitle": "string",
+                  "background": "string",
+                  "benefits": ["string"],
+                  "teachingForm": "string",
+                  "businessGoals": ["string"],
+                  "durationText": "string",
+                  "introOutline": "导论",
+                  "introDetailLine": "string 或省略",
+                  "modules": [
+                    {
+                      "moduleTitle": "1. 模块名（1小时）",
+                      "sections": [
+                        {
+                          "sectionTitle": "1.1. 节名",
+                          "subsections": [
+                            {
+                              "subsectionTitle": "1.1.1. 知识点标题",
+                              "detailLines": ["要点1", "要点2"]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+            - role: user
+              edition_type: basic
+              text: |-
+                课程名称：{{#start.course_name#}}
+                课程时长（请与 durationText 一致）：{{#start.course_duration#}}
+
+                ——学员画像——
+                {{#start.learner_portrait#}}
+
+                ——知识目标——
+                {{#start.course_goals_knowledge#}}
+
+                ——技能目标——
+                {{#start.course_goals_skill#}}
+
+                ——态度目标——
+                {{#start.course_goals_attitude#}}
+
+                ——课程设计解决思路——
+                {{#start.design_approach#}}
+
+                请输出上述 JSON。
+
+      - id: end
+        type: custom
+        position:
+          x: 720
+          y: 140
+        positionAbsolute:
+          x: 720
+          y: 140
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: end
+          title: 结束
+          desc: ''
+          outputs:
+            - variable: step3_outline_json
+              value_selector:
+                - llm_outline
+                - text
+
+    edges:
+      - id: start-llm_outline
+        type: custom
+        source: start
+        sourceHandle: source
+        target: llm_outline
+        targetHandle: target
+        data:
+          sourceType: start
+          targetType: llm
+          isInIteration: false
+        zIndex: 0
+      - id: llm_outline-end
+        type: custom
+        source: llm_outline
+        sourceHandle: source
+        target: end
+        targetHandle: target
+        data:
+          sourceType: llm
+          targetType: end
+          isInIteration: false
+        zIndex: 0

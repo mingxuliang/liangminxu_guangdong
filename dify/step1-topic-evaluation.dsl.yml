@@ -1,0 +1,180 @@
+# =============================================================================
+# Dify 应用 DSL · 步骤一「选题评估」工作流（广东移动智创制课）
+# -----------------------------------------------------------------------------
+# 与前端约定见：src/services/dify/step1-parse.ts、agent-dify.ts
+# 重要：version 必须为「字符串」（如 "0.6.0"），勿写成未加引号的数字，否则导入会失败。
+# LLM 节点须含 context / vision 字段，与当前 Dify Studio 前端结构一致，避免导入后白屏。
+# =============================================================================
+
+version: "0.6.0"
+kind: app
+app:
+  name: 步骤一-选题评估
+  description: 八步成诗制课 · 选题评估：生成拟开发主题名、综合分、四维分析、备选课题（与前端 course-create 步骤一对接）
+  icon_type: emoji
+  icon: '📋'
+  icon_background: '#E0F2FE'
+  mode: workflow
+  use_icon_as_answer_icon: false
+
+dependencies: []
+
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features: {}
+
+  graph:
+    nodes:
+      - id: start
+        type: custom
+        position:
+          x: 80
+          y: 200
+        positionAbsolute:
+          x: 80
+          y: 200
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: start
+          title: 开始
+          desc: ''
+          variables:
+            - variable: train_target
+              label: 培训对象
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: target_job_info
+              label: 培训对象岗位信息
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: target_job_duty
+              label: 培训对象工作职责
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: train_goal
+              label: 培训目标
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: topic_name
+              label: 拟开发的课题名称
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: course_duration
+              label: 拟开发课程时长
+              type: paragraph
+              required: false
+              max_length: 256
+
+      - id: llm_topic_eval
+        type: custom
+        position:
+          x: 400
+          y: 200
+        positionAbsolute:
+          x: 400
+          y: 200
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: llm
+          title: 选题评估 LLM
+          desc: 输出 JSON，勿使用 Markdown 代码块
+          model:
+            provider: ''
+            name: ''
+            mode: chat
+            completion_params:
+              temperature: 0.2
+              max_tokens: 4096
+          context:
+            enabled: false
+            variable_selector: []
+          vision:
+            enabled: false
+          prompt_template:
+            - role: system
+              edition_type: basic
+              text: |-
+                你是企业内训「选题评估」专家，面向广东移动等业务场景。请根据用户给出的课程设计信息，输出且仅输出一个合法 JSON 对象（不要 Markdown、不要代码围栏）。
+                JSON 字段要求：
+                - generatedTopic：string，拟开发主题名（精炼、可落地）
+                - overallScore：number，0-100 的综合分
+                - dimensions：数组，固定 4 项，每项含 label、current、total、analysis；label 依次为「稀缺度」「实用度」「鲜活度」「颗粒度」；total 默认 25；current 为不超过 total 的整数；analysis 为中文简评
+                - suggestions：string 数组，长度 3，为备选课题名称
+                确保 JSON 可被 JSON.parse 直接解析。
+            - role: user
+              edition_type: basic
+              text: |-
+                培训对象：{{#start.train_target#}}
+
+                岗位信息：{{#start.target_job_info#}}
+
+                工作职责：{{#start.target_job_duty#}}
+
+                培训目标：{{#start.train_goal#}}
+
+                拟开发课题名称：{{#start.topic_name#}}
+
+                拟开发课程时长：{{#start.course_duration#}}
+
+                请输出 JSON。
+
+      - id: end
+        type: custom
+        position:
+          x: 720
+          y: 200
+        positionAbsolute:
+          x: 720
+          y: 200
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: end
+          title: 结束
+          desc: ''
+          outputs:
+            - variable: step1_result
+              value_selector:
+                - llm_topic_eval
+                - text
+
+    edges:
+      - id: start-llm_topic_eval
+        type: custom
+        source: start
+        sourceHandle: source
+        target: llm_topic_eval
+        targetHandle: target
+        data:
+          sourceType: start
+          targetType: llm
+          isInIteration: false
+        zIndex: 0
+      - id: llm_topic_eval-end
+        type: custom
+        source: llm_topic_eval
+        sourceHandle: source
+        target: end
+        targetHandle: target
+        data:
+          sourceType: llm
+          targetType: end
+          isInIteration: false
+        zIndex: 0

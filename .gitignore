@@ -1,0 +1,13 @@
+# 环境变量（含 API Key）
+.env
+.env.local
+.env.*.local
+
+# 构建与依赖
+node_modules
+out
+dist
+*.local
+
+# Python 课件服务上传与生成文件
+ppt-service/storage/

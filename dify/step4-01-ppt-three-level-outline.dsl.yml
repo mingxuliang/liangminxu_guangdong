@@ -1,0 +1,204 @@
+# =============================================================================
+# Dify 工作流 DSL · 步骤四「课件 PPT 三级大纲」
+# -----------------------------------------------------------------------------
+# 输入：课程名称、学员画像、知识/技能/态度目标、设计解决思路（与步骤二结构化结果对齐）
+# 输出：step4_ppt_outline — JSON 字符串，slides[] 映射 MaterialMatchingEditor 单页结构
+# =============================================================================
+
+version: "0.6.0"
+kind: app
+app:
+  name: 步骤四-课件PPT三级大纲
+  description: 基于课程名称与步骤二产出，生成课件 PPT 逐页三级大纲（封面/目录/章节/正文页）
+  icon_type: emoji
+  icon: '📊'
+  icon_background: '#DBEAFE'
+  mode: workflow
+  use_icon_as_answer_icon: false
+
+dependencies: []
+
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features: {}
+
+  graph:
+    nodes:
+      - id: start
+        type: custom
+        position:
+          x: 80
+          y: 140
+        positionAbsolute:
+          x: 80
+          y: 140
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: start
+          title: 开始
+          desc: ''
+          variables:
+            - variable: course_name
+              label: 课程名称
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: learner_portrait
+              label: 学员画像
+              type: paragraph
+              required: false
+              max_length: 65536
+            - variable: course_goals_knowledge
+              label: 知识目标（可多行）
+              type: paragraph
+              required: false
+              max_length: 65536
+            - variable: course_goals_skill
+              label: 技能目标（可多行）
+              type: paragraph
+              required: false
+              max_length: 65536
+            - variable: course_goals_attitude
+              label: 态度目标（可多行）
+              type: paragraph
+              required: false
+              max_length: 65536
+            - variable: design_approach
+              label: 课程设计解决思路
+              type: paragraph
+              required: false
+              max_length: 65536
+
+      - id: llm_ppt_outline
+        type: custom
+        position:
+          x: 400
+          y: 140
+        positionAbsolute:
+          x: 400
+          y: 140
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: llm
+          title: 课件PPT三级大纲 JSON
+          desc: 仅输出一个 JSON 对象，勿用 Markdown 代码围栏
+          model:
+            provider: ''
+            name: ''
+            mode: chat
+            completion_params:
+              temperature: 0.3
+              max_tokens: 8192
+          context:
+            enabled: false
+            variable_selector: []
+          vision:
+            enabled: false
+          prompt_template:
+            - role: system
+              edition_type: basic
+              text: |-
+                你是企业培训课程与课件设计专家。请根据课程名称、学员画像、三维课程目标与教学设计思路，生成「线下/线上授课用」课件 PPT 的**三级大纲**，并仅输出一个合法 JSON 对象（不要 Markdown、不要 ``` 代码块）。
+
+                三级含义：
+                - 一级：课程模块/大章（体现在「目录」与「章节过渡页」的标题中）；
+                - 二级：每一张 PPT 幻灯片的标题（slide.title），对应节/知识点块；
+                - 三级：每张片内的要点，放在 subItems 的 lines 中；若某节下还有小标题，用 subItems[].label 作为三级小标题，lines 为更细的要点。
+
+                JSON 结构必须严格如下（字段名固定）：
+                {
+                  "slides": [
+                    {
+                      "title": "本页 PPT 标题（二级）",
+                      "contentLines": ["可选：页顶说明或短句，无则 []"],
+                      "subItems": [
+                        {
+                          "label": "三级小标题或活动名称（可选）",
+                          "lines": ["要点1", "要点2"]
+                        }
+                      ]
+                    }
+                  ]
+                }
+
+                要求：
+                1) 第一页通常为「封面」，contentLines 可含课程全称；第二页「目录」列出主要模块标题（字符串放入 contentLines 或拆成多条）。
+                2) 按教学逻辑递进：导论→分模块→总结/行动承诺；模块之间可用 title 含「章节」或模块名的过渡页。
+                3) slides 数量建议 12～24 页（可按课程复杂度略增减），每页标题简洁、可独立成幻灯片。
+                4) 内容须与学员画像、目标层次、设计思路一致，避免无关扩展。
+                5) subItems 可省略或置为 []；需要时用 label + lines 呈现层级。
+            - role: user
+              edition_type: basic
+              text: |-
+                课程名称：{{#start.course_name#}}
+
+                ——学员画像——
+                {{#start.learner_portrait#}}
+
+                ——课程目标——
+                {{#start.course_goals_knowledge#}}
+
+                {{#start.course_goals_skill#}}
+
+                {{#start.course_goals_attitude#}}
+
+                ——课程设计解决思路——
+                {{#start.design_approach#}}
+
+                请输出上述 JSON（slides 数组）。
+
+      - id: end
+        type: custom
+        position:
+          x: 720
+          y: 140
+        positionAbsolute:
+          x: 720
+          y: 140
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: end
+          title: 结束
+          desc: ''
+          outputs:
+            - variable: step4_ppt_outline
+              value_selector:
+                - llm_ppt_outline
+                - text
+
+    edges:
+      - id: start-llm_ppt_outline
+        type: custom
+        source: start
+        sourceHandle: source
+        target: llm_ppt_outline
+        targetHandle: target
+        data:
+          sourceType: start
+          targetType: llm
+          isInIteration: false
+        zIndex: 0
+      - id: llm_ppt_outline-end
+        type: custom
+        source: llm_ppt_outline
+        sourceHandle: source
+        target: end
+        targetHandle: target
+        data:
+          sourceType: llm
+          targetType: end
+          isInIteration: false
+        zIndex: 0

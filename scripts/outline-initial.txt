@@ -1,0 +1,54 @@
+
+<p style="text-align:center;font-size:16px;font-weight:bold;margin:0 0 16px;">《示例课程：课程大纲》</p>
+
+<p style="font-weight:bold;color:#111827;margin:14px 0 4px;">一、【课程背景】</p>
+<p style="text-indent:2em;line-height:1.9;margin:0 0 8px;">本示例大纲用于在 Dify 未返回或网络较慢时展示版式。请结合第二步学员画像与课程目标完善内容。</p>
+
+<p style="font-weight:bold;color:#111827;margin:14px 0 4px;">二、【课程收益】</p>
+<p style="margin:2px 0 2px 2em;">掌握结构化大纲编写方法，便于与 PPT、讲义联动。</p>
+<p style="margin:2px 0 2px 2em;">明确四级结构：模块—节—知识点—要点行。</p>
+
+<p style="font-weight:bold;color:#111827;margin:14px 0 4px;">三、【教学形式】</p>
+<p style="margin:2px 0 2px 2em;">面授 + 案例研讨 + 小组演练</p>
+
+<p style="font-weight:bold;color:#111827;margin:14px 0 4px;">四、【业务目标】</p>
+<p style="margin:2px 0 2px 2em;">提升培训与业务目标对齐度。</p>
+
+<p style="font-weight:bold;color:#111827;margin:14px 0 4px;">五、【课程时长】</p>
+<p style="margin:2px 0 2px 2em;">6课时</p>
+
+<p style="font-weight:bold;color:#111827;margin:14px 0 8px;">六、【课程大纲】</p>
+
+<p style="font-style:italic;font-weight:bold;margin:6px 0 4px 2em;">导论</p>
+<p style="margin:2px 0 4px 4em;">以业务场景导入，说明本课程学习路径与考核要点。</p>
+
+<p style="font-weight:bold;margin:10px 0 6px 2em;">1. 第一模块：基础知识</p>
+
+<p style="font-weight:bold;margin:6px 0 4px 3em;">1.1. 第一节：概念与框架</p>
+
+<p style="font-weight:bold;margin:4px 0 2px 4em;">1.1.1. 知识点：核心概念</p>
+<p style="margin:2px 0 2px 5em;">说明定义、边界与常见误区。</p>
+<p style="margin:2px 0 2px 5em;">配合简例帮助理解。</p>
+
+<p style="font-weight:bold;margin:4px 0 2px 4em;">1.1.2. 知识点：应用场景</p>
+<p style="margin:2px 0 2px 5em;">列举 2～3 个典型工作场景。</p>
+
+<p style="font-weight:bold;margin:10px 0 6px 2em;">2. 第二模块：方法与演练</p>
+
+<p style="font-weight:bold;margin:6px 0 4px 3em;">2.1. 第一节：方法流程</p>
+
+<p style="font-weight:bold;margin:4px 0 2px 4em;">2.1.1. 知识点：步骤拆解</p>
+<p style="margin:2px 0 2px 5em;">分步演示与练习。</p>
+
+<p style="font-weight:bold;margin:4px 0 2px 4em;">2.1.2. 知识点：小结与复盘</p>
+<p style="margin:2px 0 2px 5em;">输出 checklist 与改进点。</p>
+
+<p style="font-weight:bold;margin:10px 0 6px 2em;">3. 第三模块：综合应用</p>
+
+<p style="font-weight:bold;margin:6px 0 4px 3em;">3.1. 第一节：综合演练</p>
+
+<p style="font-weight:bold;margin:4px 0 2px 4em;">3.1.1. 知识点：案例研讨</p>
+<p style="margin:2px 0 2px 5em;">小组讨论并汇报。</p>
+
+<p style="font-weight:bold;margin:4px 0 2px 4em;">3.1.2. 知识点：落地计划</p>
+<p style="margin:2px 0 2px 5em;">形成可执行的行动计划。</p>

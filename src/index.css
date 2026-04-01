@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 智能生成进度 · GenerationProgressScreen */
+@layer utilities {
+  @keyframes gp-blob {
+    0%,
+    100% {
+      opacity: 0.55;
+      transform: translate(-50%, 0) scale(1);
+    }
+    50% {
+      opacity: 0.95;
+      transform: translate(-50%, 0) scale(1.08);
+    }
+  }
+  .gp-blob-anim {
+    animation: gp-blob 4.5s ease-in-out infinite;
+  }
+  @keyframes gp-shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+  .gp-shimmer-bar {
+    background: linear-gradient(
+      90deg,
+      rgba(59, 130, 246, 0.15) 0%,
+      rgba(59, 130, 246, 0.55) 45%,
+      rgba(34, 211, 238, 0.5) 55%,
+      rgba(59, 130, 246, 0.15) 100%
+    );
+    background-size: 200% 100%;
+    animation: gp-shimmer 2.2s ease-in-out infinite;
+  }
+  @keyframes gp-orbit {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .gp-orbit-ring {
+    animation: gp-orbit 2.8s linear infinite;
+  }
+  @keyframes gp-dots {
+    0%,
+    100% {
+      opacity: 0.35;
+      transform: scale(0.85);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  .gp-dot-pulse {
+    animation: gp-dots 1.2s ease-in-out infinite;
+  }
+}

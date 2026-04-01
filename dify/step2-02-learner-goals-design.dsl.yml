@@ -1,0 +1,215 @@
+# =============================================================================
+# Dify 工作流 DSL · 步骤二-B「学员画像 · 课程目标 · 设计思路」
+# -----------------------------------------------------------------------------
+# 对应前端：CourseAnalysisResultEditor（学员画像、知识/技能/态度目标、教学设计思路）
+# 建议在用户完成步骤二-A 后调用：传入步骤二-A 产出的 evaluation_report + 同一套课题分析字段，便于前后一致。
+# API：结束节点输出 step2_structured_result（字符串 = 一整段 JSON，见下方 LLM 说明）
+# =============================================================================
+
+version: "0.6.0"
+kind: app
+app:
+  name: 步骤二B-学员画像与课程目标
+  description: 课程分析 · 输出学员画像、三维课程目标（知识/技能/态度）、教学设计思路（与 CourseAnalysisResultEditor 数据结构对齐）
+  icon_type: emoji
+  icon: '🎯'
+  icon_background: '#DCFCE7'
+  mode: workflow
+  use_icon_as_answer_icon: false
+
+dependencies: []
+
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features: {}
+
+  graph:
+    nodes:
+      - id: start
+        type: custom
+        position:
+          x: 80
+          y: 140
+        positionAbsolute:
+          x: 80
+          y: 140
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: start
+          title: 开始
+          desc: ''
+          variables:
+            - variable: evaluation_report
+              label: 课程分析评估报告（步骤二-A 产出）
+              type: paragraph
+              required: false
+              max_length: 65536
+            - variable: topic_name
+              label: 拟开发课题名称
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: need_background
+              label: 需求背景
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: business_analysis
+              label: 培训对象业务分析
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: task_analysis
+              label: 培训对象任务分析
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: required_ability
+              label: 培训对象所需的能力项及达标程度
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: ability_gap
+              label: 培训对象目前的能力短板
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: current_ability
+              label: 培训对象现有能力
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: learning_motivation
+              label: 培训对象学习动机
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: learning_style
+              label: 培训对象学习风格分析
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: past_learning_effect
+              label: 培训对象过往学习效果分析
+              type: paragraph
+              required: false
+              max_length: 8192
+
+      - id: llm_structured_result
+        type: custom
+        position:
+          x: 400
+          y: 140
+        positionAbsolute:
+          x: 400
+          y: 140
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: llm
+          title: 学员画像与课程目标 JSON
+          desc: 仅输出一个 JSON 对象，勿用 Markdown 代码围栏
+          model:
+            provider: ''
+            name: ''
+            mode: chat
+            completion_params:
+              temperature: 0.25
+              max_tokens: 8192
+          context:
+            enabled: false
+            variable_selector: []
+          vision:
+            enabled: false
+          prompt_template:
+            - role: system
+              edition_type: basic
+              text: |-
+                你是企业培训课程设计专家。请根据《课程分析评估报告》及课题分析信息，输出且仅输出一个合法 JSON 对象（不要 Markdown、不要 ``` 代码块）。
+                JSON 结构必须严格如下（字段名使用 camelCase）：
+                {
+                  "learnerPortrait": "string，一段完整的学员画像描述，含岗位、能力现状、学习风格与动机等",
+                  "courseGoals": {
+                    "knowledge": ["若干条知识目标，字符串数组"],
+                    "skill": ["若干条技能目标，字符串数组"],
+                    "attitude": ["若干条态度目标，字符串数组"]
+                  },
+                  "designApproach": "string，教学设计思路：可含问题导向、场景化、互动练习、成果转化等，分段落书写"
+                }
+                knowledge/skill/attitude 每组建议 3～5 条，具体可执行、可考核。
+            - role: user
+              edition_type: basic
+              text: |-
+                拟开发课题名称：
+                {{#start.topic_name#}}
+
+                ——《课程分析评估报告》——
+                {{#start.evaluation_report#}}
+
+                ——原始课题分析字段（与报告对照使用）——
+                需求背景：{{#start.need_background#}}
+                业务分析：{{#start.business_analysis#}}
+                任务分析：{{#start.task_analysis#}}
+                所需能力：{{#start.required_ability#}}
+                能力短板：{{#start.ability_gap#}}
+                现有能力：{{#start.current_ability#}}
+                学习动机：{{#start.learning_motivation#}}
+                学习风格：{{#start.learning_style#}}
+                过往学习效果：{{#start.past_learning_effect#}}
+
+                请输出上述 JSON。
+
+      - id: end
+        type: custom
+        position:
+          x: 720
+          y: 140
+        positionAbsolute:
+          x: 720
+          y: 140
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: end
+          title: 结束
+          desc: ''
+          outputs:
+            - variable: step2_structured_result
+              value_selector:
+                - llm_structured_result
+                - text
+
+    edges:
+      - id: start-llm_structured_result
+        type: custom
+        source: start
+        sourceHandle: source
+        target: llm_structured_result
+        targetHandle: target
+        data:
+          sourceType: start
+          targetType: llm
+          isInIteration: false
+        zIndex: 0
+      - id: llm_structured_result-end
+        type: custom
+        source: llm_structured_result
+        sourceHandle: source
+        target: end
+        targetHandle: target
+        data:
+          sourceType: llm
+          targetType: end
+          isInIteration: false
+        zIndex: 0

@@ -1,0 +1,217 @@
+# =============================================================================
+# Dify 工作流 DSL · 步骤二-A「课程分析评估报告」
+# -----------------------------------------------------------------------------
+# 对应前端：CourseAnalysisInputPanel 全部字段 → CourseAnalysisOutputPanel 报告正文
+# API：POST .../workflows/run，inputs 使用下方 snake_case；结束节点输出 step2_evaluation_report（纯文本/Markdown）
+# version 须为字符串 "0.6.0"；LLM 含 context / vision，避免 Studio 导入后白屏
+# =============================================================================
+
+version: "0.6.0"
+kind: app
+app:
+  name: 步骤二A-课程分析评估
+  description: 课程分析 · 根据课题分析信息生成《课程分析评估报告》（需求背景、画像、能力差距、学习特征、综合建议）
+  icon_type: emoji
+  icon: '📊'
+  icon_background: '#FEF3C7'
+  mode: workflow
+  use_icon_as_answer_icon: false
+
+dependencies: []
+
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features: {}
+
+  graph:
+    nodes:
+      - id: start
+        type: custom
+        position:
+          x: 80
+          y: 160
+        positionAbsolute:
+          x: 80
+          y: 160
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: start
+          title: 开始
+          desc: ''
+          variables:
+            - variable: topic_name
+              label: 拟开发课题名称
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: need_background
+              label: 需求背景
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: business_analysis
+              label: 培训对象业务分析
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: task_analysis
+              label: 培训对象任务分析
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: required_ability
+              label: 培训对象所需的能力项及达标程度
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: ability_gap
+              label: 培训对象目前的能力短板
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: current_ability
+              label: 培训对象现有能力
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: learning_motivation
+              label: 培训对象学习动机
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: learning_style
+              label: 培训对象学习风格分析
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: past_learning_effect
+              label: 培训对象过往学习效果分析
+              type: paragraph
+              required: false
+              max_length: 8192
+
+      - id: llm_analysis_report
+        type: custom
+        position:
+          x: 400
+          y: 160
+        positionAbsolute:
+          x: 400
+          y: 160
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: llm
+          title: 生成课程分析评估报告
+          desc: 输出 Markdown 正文，勿用代码围栏包裹全文
+          model:
+            provider: ''
+            name: ''
+            mode: chat
+            completion_params:
+              temperature: 0.3
+              max_tokens: 8192
+          context:
+            enabled: false
+            variable_selector: []
+          vision:
+            enabled: false
+          prompt_template:
+            - role: system
+              edition_type: basic
+              text: |-
+                你是企业培训领域的课程设计顾问，擅长「课程分析」。请根据用户提供的课题分析信息，撰写一份结构清晰、可落地的《课程分析评估报告》。
+                要求：
+                - 使用 Markdown，可用二级标题（##）组织章节；不要输出 JSON；不要用 Markdown 代码块包裹整篇报告。
+                - 报告须覆盖：需求背景分析、培训对象画像、能力差距分析、学习特征与风险点、综合评估与课程设计建议。
+                - 语言专业、具体，少空话，可适当分点（- 或 1.）。
+                - 开篇可加一行标题：【课程分析评估报告】
+            - role: user
+              edition_type: basic
+              text: |-
+                拟开发课题名称：
+                {{#start.topic_name#}}
+
+                需求背景：
+                {{#start.need_background#}}
+
+                培训对象业务分析：
+                {{#start.business_analysis#}}
+
+                培训对象任务分析：
+                {{#start.task_analysis#}}
+
+                所需能力项及达标程度：
+                {{#start.required_ability#}}
+
+                能力短板：
+                {{#start.ability_gap#}}
+
+                现有能力：
+                {{#start.current_ability#}}
+
+                学习动机：
+                {{#start.learning_motivation#}}
+
+                学习风格：
+                {{#start.learning_style#}}
+
+                过往学习效果：
+                {{#start.past_learning_effect#}}
+
+                请输出完整报告正文。
+
+      - id: end
+        type: custom
+        position:
+          x: 720
+          y: 160
+        positionAbsolute:
+          x: 720
+          y: 160
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: end
+          title: 结束
+          desc: ''
+          outputs:
+            - variable: step2_evaluation_report
+              value_selector:
+                - llm_analysis_report
+                - text
+
+    edges:
+      - id: start-llm_analysis_report
+        type: custom
+        source: start
+        sourceHandle: source
+        target: llm_analysis_report
+        targetHandle: target
+        data:
+          sourceType: start
+          targetType: llm
+          isInIteration: false
+        zIndex: 0
+      - id: llm_analysis_report-end
+        type: custom
+        source: llm_analysis_report
+        sourceHandle: source
+        target: end
+        targetHandle: target
+        data:
+          sourceType: llm
+          targetType: end
+          isInIteration: false
+        zIndex: 0
