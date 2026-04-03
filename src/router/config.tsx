@@ -6,6 +6,7 @@ import AiCourse from "../pages/ai-course/page";
 import CourseCreate from "../pages/course-create/page";
 import MicroCourse from "../pages/micro-course/page";
 import UserManagement from "../pages/system/users/page";
+import KnowledgeExtraction from "../pages/knowledge-extraction/page";
 import RequireAuth from "./RequireAuth";
 
 const routes: RouteObject[] = [
@@ -42,6 +43,14 @@ const routes: RouteObject[] = [
     element: (
       <RequireAuth>
         <MicroCourse />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/knowledge-extraction",
+    element: (
+      <RequireAuth>
+        <KnowledgeExtraction />
       </RequireAuth>
     ),
   },

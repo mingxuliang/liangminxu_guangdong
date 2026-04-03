@@ -90,12 +90,13 @@ export type NavItem = {
   id: string;
   label: string;
   icon: string;
-  path?: '/micro-course' | '/ai-course';
+  path?: '/micro-course' | '/ai-course' | '/knowledge-extraction';
 };
 
 export const navItems: NavItem[] = [
   { id: 'ai-design', label: 'AI课程制作', icon: 'ri-robot-2-line', path: '/ai-course' },
   { id: 'tips', label: 'AI微课开发', icon: 'ri-lightbulb-flash-line', path: '/micro-course' },
+  { id: 'knowledge-extraction', label: '知识萃取', icon: 'ri-filter-3-line', path: '/knowledge-extraction' },
   { id: 'knowledge', label: '素材管理中心', icon: 'ri-video-line' },
   { id: 'tools', label: '系统管理', icon: 'ri-tools-line' },
 ];

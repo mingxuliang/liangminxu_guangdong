@@ -14,6 +14,8 @@ export default defineConfig(({ mode }) => {
     env.DIFY_PROXY_TARGET || "https://api.dify.ai";
   const islideProxyTarget =
     env.ISLIDE_PROXY_TARGET || "https://islide.market.alicloudapi.com";
+  const apiProxyTarget =
+    env.VITE_API_PROXY_TARGET || "http://127.0.0.1:8787";
 
   return {
   define: {
@@ -90,6 +92,11 @@ export default defineConfig(({ mode }) => {
     port: 3000,
     host: "0.0.0.0",
     proxy: {
+      /** 知识萃取等本地 BFF：/api → Node server（见 server/index.mjs） */
+      "/api": {
+        target: apiProxyTarget,
+        changeOrigin: true,
+      },
       /** 本地开发绕过跨域；请求 /dify-api/v1/... 转发到 DIFY_PROXY_TARGET（如自建 http://81.70.78.132:8088） */
       "/dify-api": {
         target: difyProxyTarget,

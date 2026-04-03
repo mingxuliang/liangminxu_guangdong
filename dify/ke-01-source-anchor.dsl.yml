@@ -1,0 +1,187 @@
+# =============================================================================
+# Dify 工作流 DSL · 知识萃取「源头锚定」
+# -----------------------------------------------------------------------------
+# 后端 POST .../v1/workflows/run，inputs（snake_case）：
+#   mode, extract_goal, target_audience, use_scenes(JSON 字符串), course_title, material_bundle_text
+# 结束节点输出 anchor_package：LLM 输出一段 JSON 字符串（勿用 Markdown 代码围栏包裹全文）
+# 导入 Studio 后请将 LLM 节点绑定实际模型，并保存发布；复制 API Key 到服务端 KE_ANCHOR_API_KEY
+# =============================================================================
+
+version: "0.6.0"
+kind: app
+app:
+  name: 知识萃取-源头锚定
+  description: 根据萃取目标、受众、场景与素材合并文本，输出结构化 anchor_package（JSON）
+  icon_type: emoji
+  icon: '⚓'
+  icon_background: '#DBEAFE'
+  mode: workflow
+  use_icon_as_answer_icon: false
+
+dependencies: []
+
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features: {}
+
+  graph:
+    nodes:
+      - id: start
+        type: custom
+        position:
+          x: 80
+          y: 160
+        positionAbsolute:
+          x: 80
+          y: 160
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: start
+          title: 开始
+          desc: ''
+          variables:
+            - variable: mode
+              label: 模式 course 或 manual
+              type: paragraph
+              required: false
+              max_length: 64
+            - variable: extract_goal
+              label: 萃取目标
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: target_audience
+              label: 目标受众
+              type: paragraph
+              required: false
+              max_length: 4096
+            - variable: use_scenes
+              label: 应用场景 JSON 数组字符串
+              type: paragraph
+              required: false
+              max_length: 2048
+            - variable: course_title
+              label: 课程标题
+              type: paragraph
+              required: false
+              max_length: 2048
+            - variable: material_bundle_text
+              label: 素材合并文本
+              type: paragraph
+              required: false
+              max_length: 120000
+
+      - id: llm_anchor
+        type: custom
+        position:
+          x: 400
+          y: 160
+        positionAbsolute:
+          x: 400
+          y: 160
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: llm
+          title: 生成源头锚定 anchor_package
+          desc: 仅输出 JSON 对象字符串，不要用 Markdown 代码块包裹
+          model:
+            provider: ''
+            name: ''
+            mode: chat
+            completion_params:
+              temperature: 0.2
+              max_tokens: 8192
+          context:
+            enabled: false
+            variable_selector: []
+          vision:
+            enabled: false
+          prompt_template:
+            - role: system
+              edition_type: basic
+              text: |-
+                你是企业知识管理顾问，负责「源头锚定」：明确本次知识萃取的范围、重点与边界。
+                你必须只输出一个 JSON 对象（不要 Markdown 代码围栏，不要多余说明文字），字段如下：
+                - anchor_summary: string，2～4 句中文，概括本次锚定范围与重点
+                - scope_in: string[]，本次应纳入萃取的主题/知识范围
+                - scope_out: string[]，明确排除或不纳入的范围
+                - material_inventory: [{ "kind": string, "status": "ok"|"weak"|"missing", "note": string }] 对输入素材的简要盘点
+                - gaps: string[]，材料缺口或需用户补充的信息
+                - downstream_hints: string，给「分层筛选」步骤的一句话提示
+            - role: user
+              edition_type: basic
+              text: |-
+                模式：{{#start.mode#}}
+
+                萃取目标：
+                {{#start.extract_goal#}}
+
+                目标受众：
+                {{#start.target_audience#}}
+
+                应用场景（JSON 字符串）：
+                {{#start.use_scenes#}}
+
+                课程标题（可为空）：
+                {{#start.course_title#}}
+
+                素材合并文本：
+                {{#start.material_bundle_text#}}
+
+                请输出符合要求的 JSON 对象。
+
+      - id: end
+        type: custom
+        position:
+          x: 720
+          y: 160
+        positionAbsolute:
+          x: 720
+          y: 160
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: end
+          title: 结束
+          desc: ''
+          outputs:
+            - variable: anchor_package
+              value_selector:
+                - llm_anchor
+                - text
+
+    edges:
+      - id: start-llm_anchor
+        type: custom
+        source: start
+        sourceHandle: source
+        target: llm_anchor
+        targetHandle: target
+        data:
+          sourceType: start
+          targetType: llm
+          isInIteration: false
+        zIndex: 0
+      - id: llm_anchor-end
+        type: custom
+        source: llm_anchor
+        sourceHandle: source
+        target: end
+        targetHandle: target
+        data:
+          sourceType: llm
+          targetType: end
+          isInIteration: false
+        zIndex: 0

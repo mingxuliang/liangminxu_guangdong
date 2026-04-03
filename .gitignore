@@ -11,3 +11,7 @@ dist
 
 # Python 课件服务上传与生成文件
 ppt-service/storage/
+
+# 知识萃取本地 API
+server/data/
+server/uploads/

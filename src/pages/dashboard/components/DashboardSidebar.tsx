@@ -7,6 +7,7 @@ import { logout } from '../../../utils/auth';
 const PATH_TO_NAV: Record<string, string> = {
   '/ai-course': 'ai-design',
   '/micro-course': 'tips',
+  '/knowledge-extraction': 'knowledge-extraction',
   '/course/create': 'ai-design',
   '/system/users': 'tools',
 };
