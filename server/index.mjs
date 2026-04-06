@@ -1,4 +1,7 @@
-import 'dotenv/config';
+// 按优先级加载环境变量：.env → .env.local（.env.local 会覆盖 .env）
+import { config as dotenvConfig } from 'dotenv';
+dotenvConfig();                              // 先加载 .env
+dotenvConfig({ path: '.env.local', override: true }); // .env.local 优先级更高
 import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';

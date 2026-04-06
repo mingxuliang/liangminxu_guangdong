@@ -30,13 +30,13 @@ export function isKeApiEnabled(): boolean {
 }
 
 export async function keHealth(): Promise<{ ok: boolean }> {
-  const r = await fetch(url('/api/health'));
+  const r = await fetch(url('/health'));
   if (!r.ok) throw new Error(`health ${r.status}`);
   return r.json() as Promise<{ ok: boolean }>;
 }
 
 export async function keCreateSession(body: Partial<KeSession>): Promise<KeSession> {
-  const r = await fetch(url('/api/knowledge-extraction/sessions'), {
+  const r = await fetch(url('/knowledge-extraction/sessions'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -46,7 +46,7 @@ export async function keCreateSession(body: Partial<KeSession>): Promise<KeSessi
 }
 
 export async function kePatchSession(id: string, body: Partial<KeSession>): Promise<KeSession> {
-  const r = await fetch(url(`/api/knowledge-extraction/sessions/${id}`), {
+  const r = await fetch(url(`/knowledge-extraction/sessions/${id}`), {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -56,7 +56,7 @@ export async function kePatchSession(id: string, body: Partial<KeSession>): Prom
 }
 
 export async function keGetSession(id: string): Promise<KeSession> {
-  const r = await fetch(url(`/api/knowledge-extraction/sessions/${id}`));
+  const r = await fetch(url(`/knowledge-extraction/sessions/${id}`));
   if (!r.ok) throw new Error(await r.text());
   return r.json() as Promise<KeSession>;
 }
@@ -65,7 +65,7 @@ export async function keUploadAsset(sessionId: string, file: File, kind: string)
   const fd = new FormData();
   fd.append('file', file);
   fd.append('kind', kind);
-  const r = await fetch(url(`/api/knowledge-extraction/sessions/${sessionId}/assets`), {
+  const r = await fetch(url(`/knowledge-extraction/sessions/${sessionId}/assets`), {
     method: 'POST',
     body: fd,
   });
@@ -74,7 +74,7 @@ export async function keUploadAsset(sessionId: string, file: File, kind: string)
 }
 
 export async function keRunAnchor(sessionId: string): Promise<KeSession> {
-  const r = await fetch(url(`/api/knowledge-extraction/sessions/${sessionId}/anchor/run`), {
+  const r = await fetch(url(`/knowledge-extraction/sessions/${sessionId}/anchor/run`), {
     method: 'POST',
   });
   const text = await r.text();
