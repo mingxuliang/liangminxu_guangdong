@@ -187,7 +187,12 @@ app.post('/api/knowledge-extraction/sessions/:id/anchor/run', async (req, res) =
         continue;
       }
       console.log(`[anchor/run] 开始转写音频: ${asset.original_name}`);
-      asset.extracted_text = await transcribeAudio(absPath, asset.original_name);
+      // 传入 session 上下文，让精炼工作流能利用萃取目标和课程信息
+      asset.extracted_text = await transcribeAudio(absPath, asset.original_name, {
+        extract_goal: s.extract_goal || '',
+        course_title: s.course_title || '',
+        target_audience: s.target_audience || '',
+      });
       asset.audio_pending = false;
       audioTranscribed = true;
       console.log(`[anchor/run] 转写完成: ${asset.original_name} (${asset.extracted_text.length} 字)`);

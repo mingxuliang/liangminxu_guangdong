@@ -1,0 +1,231 @@
+# =============================================================================
+# Dify 工作流 DSL · 知识萃取「音频转写精炼」辅助工作流
+# -----------------------------------------------------------------------------
+# 功能：对语音转文字（audio-to-text）的原始文本进行清洗和结构化，
+#       使其成为高质量的知识萃取素材，再传给 ke-01 源头锚定工作流。
+#
+# 典型问题（原始转写文本）：
+#   - 无标点符号，口语化，存在语气词（"那个"、"嗯"、"然后"）
+#   - 说话人切换没有标注，多人讲话混在一起
+#   - 重复表达、句子断裂、语序混乱
+#   - 大量非知识性内容（点名、互动寒暄等）
+#
+# 输入：raw_transcript, course_title, extract_goal, target_audience
+# 输出：refined_transcript（结构化讲课内容，可直接作为 ke-01 的素材）
+# =============================================================================
+
+version: "0.6.0"
+kind: app
+app:
+  name: 知识萃取-音频转写精炼
+  description: 清洗音频转写原始文本，识别讲师知识点，结构化整理为高质量萃取素材
+  icon_type: emoji
+  icon: '🎙️'
+  icon_background: '#F5F3FF'
+  mode: workflow
+  use_icon_as_answer_icon: false
+
+dependencies: []
+
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features: {}
+
+  graph:
+    nodes:
+      - id: start
+        type: custom
+        position:
+          x: 80
+          y: 160
+        positionAbsolute:
+          x: 80
+          y: 160
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: start
+          title: 开始
+          desc: ''
+          variables:
+            - variable: raw_transcript
+              label: 原始转写文本（audio-to-text 输出）
+              type: paragraph
+              required: true
+              max_length: 200000
+            - variable: course_title
+              label: 课程名称（选填）
+              type: paragraph
+              required: false
+              max_length: 512
+            - variable: extract_goal
+              label: 萃取目标（选填，有助于提高精炼准确性）
+              type: paragraph
+              required: false
+              max_length: 4096
+            - variable: target_audience
+              label: 目标受众（选填）
+              type: paragraph
+              required: false
+              max_length: 1024
+
+      - id: llm_refine
+        type: custom
+        position:
+          x: 400
+          y: 160
+        positionAbsolute:
+          x: 400
+          y: 160
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: llm
+          title: 音频转写精炼
+          desc: 清洗转写文本，提取知识内容，结构化整理
+          model:
+            provider: ''
+            name: ''
+            mode: chat
+            completion_params:
+              temperature: 0.2
+              max_tokens: 8000
+          context:
+            enabled: false
+            variable_selector: []
+          vision:
+            enabled: false
+          prompt_template:
+            - role: system
+              edition_type: basic
+              text: |-
+                你是企业培训音频内容分析专家，专注于将面授课程录音的原始转写文本转化为高质量的知识萃取素材。
+
+                ## 你需要解决的核心问题
+                语音转文字（ASR）的原始输出存在以下典型问题：
+                - **无标点**：整段文字连在一起，无法识别句子边界
+                - **口语化**：充满"那个"、"嗯"、"然后就是说"等语气词
+                - **重复和停顿**：讲师重复表达同一观点的句子
+                - **非知识内容**：签到、点名、课间休息、互动闲聊等与知识无关的内容
+                - **说话人混淆**：学员提问和讲师回答混在一起，没有区分
+
+                ## 四大萃取核心目标（精炼判断依据）
+                1. **沉淀可复用资产**：重点保留可标准化、可传承的知识内容
+                2. **衔接课程全闭环**：提取能为后续微课、工具包开发提供素材的内容
+                3. **保障内容一致性**：去除偏题、重复、低质量的内容
+                4. **赋能实践落地**：重点保留讲师经验、案例、操作方法
+
+                ## 精炼规则
+                - **保留**：知识点讲解、方法论介绍、操作步骤、案例分析、讲师经验、学员问答（有价值的）
+                - **删除**：语气词/口头禅、重复句子、签到点名、宣布休息、无实质内容的过渡语
+                - **修复**：补充标点符号，修复明显的 ASR 识别错误，整理句子结构
+                - **标注**：用 【讲师】 标注讲师发言，用 【学员问】 标注有价值的学员问题
+
+                ## 输出格式
+                按以下结构输出精炼后的文本（纯文本，无 JSON，无代码围栏）：
+
+                ## 【课程录音精炼内容】
+                课程：{course_title}
+                精炼摘要：（2-3句话，概括本段录音的主要知识主题）
+
+                ---
+
+                ### 主要知识模块
+
+                #### 模块一：{知识主题}
+                【讲师】{精炼后的讲解内容，保留完整语义，去除口语杂质}
+
+                （如有有价值的学员互动）
+                【学员问】{问题}
+                【讲师】{回答，去除口语化表达，保留核心内容}
+
+                #### 模块二：{知识主题}
+                ...
+
+                ---
+
+                ### 讲师关键经验 & 隐性知识
+                （提炼讲师在讲解中透露的经验判断、避坑技巧、判断标准，可能来自不易被 PPT 体现的口头补充）
+                - {经验要点1}
+                - {经验要点2}
+
+                ---
+
+                ### 典型案例 & 举例
+                （提取讲师举的例子、成功/失败案例）
+                - 案例/举例：{案例内容}
+
+                ---
+
+                *精炼说明：原始录音约 {预估字数} 字，精炼保留 {保留字数} 字，删除约 {删除比例}% 的口语/重复内容。*
+
+            - role: user
+              edition_type: basic
+              text: |-
+                课程名称：{{#start.course_title#}}
+
+                萃取目标：{{#start.extract_goal#}}
+
+                目标受众：{{#start.target_audience#}}
+
+                以下是音频转写原始文本，请按照精炼规则进行处理：
+
+                ---
+                {{#start.raw_transcript#}}
+                ---
+
+                请输出精炼后的结构化内容：
+
+      - id: end
+        type: custom
+        position:
+          x: 720
+          y: 160
+        positionAbsolute:
+          x: 720
+          y: 160
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: end
+          title: 结束
+          desc: ''
+          outputs:
+            - variable: refined_transcript
+              value_selector:
+                - llm_refine
+                - text
+
+    edges:
+      - id: start-llm_refine
+        type: custom
+        source: start
+        sourceHandle: source
+        target: llm_refine
+        targetHandle: target
+        data:
+          sourceType: start
+          targetType: llm
+          isInIteration: false
+        zIndex: 0
+      - id: llm_refine-end
+        type: custom
+        source: llm_refine
+        sourceHandle: source
+        target: end
+        targetHandle: target
+        data:
+          sourceType: llm
+          targetType: end
+          isInIteration: false
+        zIndex: 0

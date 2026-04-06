@@ -352,6 +352,58 @@ function buildMockOptimizedContent(inputs) {
   return `${base}\n\n【AI二次优化】经深度分析，该知识点在实际应用中需结合具体业务场景灵活调整，建议配合案例库使用，可提升学员理解效率。（请配置 KE_REEXTRACT_API_KEY 并导入 ke-04 工作流以获取真实 AI 优化内容）`;
 }
 
+// ── 音频转写精炼（调用 ke-audio-transcript-refine 工作流）─────────────────
+
+export async function runKeAudioRefineWorkflow(inputs) {
+  const apiKey = process.env.KE_AUDIO_REFINE_API_KEY?.trim();
+  if (!apiKey) {
+    // 未配置 Key 时直接返回原始转写，不做精炼
+    return { mock: true, refined_transcript: inputs.raw_transcript };
+  }
+
+  const user = process.env.KE_ANCHOR_USER?.trim() || 'knowledge-extraction-audio';
+  const url = `${getV1Root()}/workflows/run`;
+  // 音频精炼可能比较耗时（大量文本），给 5 分钟超时
+  const timeoutMs = Number(process.env.KE_AUDIO_REFINE_TIMEOUT_MS || 300000);
+
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+      body: JSON.stringify({ inputs, response_mode: 'blocking', user }),
+    });
+  } finally {
+    clearTimeout(tid);
+  }
+
+  const rawText = await res.text();
+  if (!res.ok) throw new Error(`Dify Audio Refine Workflow ${res.status}: ${rawText.slice(0, 800)}`);
+
+  let json;
+  try { json = JSON.parse(rawText); } catch { throw new Error('Dify 返回非 JSON'); }
+
+  const data = json.data;
+  const status = String(data?.status ?? '');
+  if (status === 'failed' || status === 'error') {
+    throw new Error(data?.error || json.message || '音频精炼工作流执行失败');
+  }
+
+  const rawOut = data?.outputs?.refined_transcript;
+  const refined_transcript = typeof rawOut === 'string' && rawOut.trim()
+    ? rawOut.trim()
+    : inputs.raw_transcript; // 兜底返回原始转写
+
+  return { mock: false, refined_transcript };
+}
+
 // ── Step 1：源头锚定（保持在下方）──────────────────────────────────────────
 
 function buildMockAnchorPackage(inputs) {

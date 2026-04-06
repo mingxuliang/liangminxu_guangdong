@@ -60,8 +60,9 @@ async function extractPdf(filePath, originalName) {
   }
 }
 
-// ── 音频：调用 Dify audio-to-text（可在上传时或 anchor/run 时调用）────────────
-export async function transcribeAudio(filePath, originalName) {
+// ── 音频：调用 Dify audio-to-text → 可选调用精炼工作流 ──────────────────────
+export async function transcribeAudio(filePath, originalName, sessionContext = {}) {
+  // sessionContext 可传入 { extract_goal, course_title, target_audience }，用于精炼工作流
   const apiKey = (
     process.env.KE_AUDIO_TO_TEXT_API_KEY ||
     process.env.KE_ANCHOR_API_KEY ||
@@ -79,6 +80,8 @@ export async function transcribeAudio(filePath, originalName) {
   const base = raw.replace(/\/$/, '');
   const v1Root = /\/v1$/i.test(base) ? base : `${base}/v1`;
 
+  // ── 第一步：音频 → 原始文字（Dify audio-to-text API）────────────────────
+  let rawTranscript = '';
   try {
     const buf = fs.readFileSync(filePath);
     const blob = new Blob([buf]);
@@ -98,15 +101,39 @@ export async function transcribeAudio(filePath, originalName) {
     }
 
     const json = await res.json();
-    const transcript = (json.text || '').trim();
-    if (!transcript) return `[音频转写结果为空: ${originalName}]`;
-    return `[音频转写 · ${originalName}]\n${truncate(transcript)}`;
+    rawTranscript = (json.text || '').trim();
+    if (!rawTranscript) return `[音频转写结果为空: ${originalName}]`;
   } catch (e) {
     return [
       `[音频转写失败（${originalName}）: ${e.message}]`,
       `请确认 Dify 实例已配置语音转文字模型，或在萃取目标中手动补充音频内容摘要。`,
     ].join('\n');
   }
+
+  // ── 第二步：原始文字 → 精炼整理（ke-audio-transcript-refine 工作流，可选）──
+  const refineApiKey = process.env.KE_AUDIO_REFINE_API_KEY?.trim();
+  if (refineApiKey) {
+    try {
+      // 动态导入避免循环依赖
+      const { runKeAudioRefineWorkflow } = await import('./difyClient.mjs');
+      const result = await runKeAudioRefineWorkflow({
+        raw_transcript: truncate(rawTranscript),
+        course_title: sessionContext.course_title || '',
+        extract_goal: sessionContext.extract_goal || '',
+        target_audience: sessionContext.target_audience || '',
+      });
+      const refined = (result.refined_transcript || '').trim();
+      if (refined && refined !== rawTranscript) {
+        return `[音频精炼内容 · ${originalName}]\n${truncate(refined)}`;
+      }
+    } catch (e) {
+      // 精炼失败时降级返回原始转写，不影响整体流程
+      console.warn(`[audio-refine] 精炼工作流调用失败，降级使用原始转写: ${e.message}`);
+    }
+  }
+
+  // 未配置精炼工作流或精炼失败：返回原始转写
+  return `[音频转写 · ${originalName}]\n${truncate(rawTranscript)}`;
 }
 
 // ── 公共入口（对外导出，音频文件直接返回 AUDIO_PENDING 占位）────────────────
