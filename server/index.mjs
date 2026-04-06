@@ -9,6 +9,7 @@ import multer from 'multer';
 
 import { runKeAnchorWorkflow } from './lib/difyClient.mjs';
 import { extractTextFromFile, mergeMaterialLines } from './lib/extractText.mjs';
+import { isOssConfigured, putLocalFileToOss } from './lib/ossUpload.mjs';
 import { createSessionRecord, loadSession, saveSession } from './lib/store.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -28,7 +29,12 @@ app.use(cors({ origin: true }));
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'knowledge-extraction-api', time: new Date().toISOString() });
+  res.json({
+    ok: true,
+    service: 'knowledge-extraction-api',
+    time: new Date().toISOString(),
+    object_storage: isOssConfigured() ? 'configured' : 'local_only',
+  });
 });
 
 app.post('/api/knowledge-extraction/sessions', (req, res) => {
@@ -75,19 +81,58 @@ const upload = multer({
   limits: { fileSize: 80 * 1024 * 1024 },
 });
 
-app.post('/api/knowledge-extraction/sessions/:id/assets', upload.single('file'), (req, res) => {
+app.post('/api/knowledge-extraction/sessions/:id/assets', upload.single('file'), async (req, res) => {
   const s = loadSession(req.params.id);
   if (!s) return res.status(404).json({ error: 'not_found' });
   if (!req.file) return res.status(400).json({ error: 'file_required' });
 
   const kind = (req.body?.kind || 'manual_upload').toString();
-  const extracted_text = extractTextFromFile(req.file.path, req.file.originalname);
+  const extracted_text = await extractTextFromFile(req.file.path, req.file.originalname);
+  const assetId = randomUUID();
+
+  /** OSS 对象键：knowledge-extraction/{sessionId}/{assetId}-{safeName} */
+  const safeName = req.file.originalname.replace(/[^\w.\-\u4e00-\u9fa5]/g, '_');
+  const ossKey = `knowledge-extraction/${req.params.id}/${assetId}-${safeName}`;
+
+  let storage = 'local';
+  let localPath = path.relative(ROOT, req.file.path).replace(/\\/g, '/');
+  let oss_bucket;
+  let oss_key;
+
+  try {
+    if (isOssConfigured()) {
+      const up = await putLocalFileToOss({
+        localPath: req.file.path,
+        objectKey: ossKey,
+        contentType: req.file.mimetype,
+      });
+      if (up) {
+        storage = 'oss';
+        oss_bucket = up.bucket;
+        oss_key = up.key;
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch {
+          /* ignore */
+        }
+        localPath = undefined;
+      }
+    }
+  } catch (e) {
+    // OSS 失败时保留本地文件，便于重试
+    return res.status(502).json({
+      error: `object_storage_upload_failed: ${String(e?.message || e)}`,
+    });
+  }
 
   const asset = {
-    id: randomUUID(),
+    id: assetId,
     kind,
     original_name: req.file.originalname,
-    path: path.relative(ROOT, req.file.path).replace(/\\/g, '/'),
+    storage,
+    path: localPath,
+    oss_bucket,
+    oss_key,
     size: req.file.size,
     mime: req.file.mimetype,
     extracted_text,
@@ -153,5 +198,7 @@ if (serveStatic && fs.existsSync(outDir)) {
 
 app.listen(PORT, '0.0.0.0', () => {
   // eslint-disable-next-line no-console
-  console.log(`[ke-api] http://0.0.0.0:${PORT}  health: /api/health`);
+  console.log(
+    `[ke-api] http://0.0.0.0:${PORT}  health: /api/health  storage: ${isOssConfigured() ? 'OSS' : 'local'}`
+  );
 });
