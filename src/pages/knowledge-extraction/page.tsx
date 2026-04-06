@@ -5,7 +5,7 @@ import ExtractionHeader from './components/ExtractionHeader';
 import ExtractionList from './components/ExtractionList';
 import SourceAnchorStep from './components/SourceAnchorStep';
 import LayeredFilterStep from './components/LayeredFilterStep';
-import type { KnowledgeItem } from '@/services/knowledgeExtractionApi';
+import type { KnowledgeItem, RefinementResult } from '@/services/knowledgeExtractionApi';
 import StructuredRefinementStep from './components/StructuredRefinementStep';
 import ValidationClosureStep from './components/ValidationClosureStep';
 
@@ -23,6 +23,7 @@ const KnowledgeExtractionPage = () => {
     setKeSessionId(null);
     setKeAnchorSummary(null);
     setKeFilterItems(null);
+    setKeRefinementResult(null);
   };
 
   const handleOpen = (_id: string) => {
@@ -38,6 +39,7 @@ const KnowledgeExtractionPage = () => {
   const [keSessionId, setKeSessionId] = useState<string | null>(null);
   const [keAnchorSummary, setKeAnchorSummary] = useState<string | null>(null);
   const [keFilterItems, setKeFilterItems] = useState<KnowledgeItem[] | null>(null);
+  const [keRefinementResult, setKeRefinementResult] = useState<RefinementResult | null>(null);
 
   const handleNext = () => setActiveStep(prev => Math.min(prev + 1, 3));
   const handlePrev = () => setActiveStep(prev => Math.max(prev - 1, 0));
@@ -153,8 +155,20 @@ const KnowledgeExtractionPage = () => {
               />
             </div>
           )}
-          {viewMode === 'workflow' && activeStep === 2 && <StructuredRefinementStep onNext={handleNext} onPrev={handlePrev} />}
-          {viewMode === 'workflow' && activeStep === 3 && <ValidationClosureStep onPrev={handlePrev} />}
+          {viewMode === 'workflow' && activeStep === 2 && (
+            <StructuredRefinementStep
+              sessionId={keSessionId}
+              onNext={(result) => { setKeRefinementResult(result); handleNext(); }}
+              onPrev={handlePrev}
+            />
+          )}
+          {viewMode === 'workflow' && activeStep === 3 && (
+            <ValidationClosureStep
+              sessionId={keSessionId}
+              refinementResult={keRefinementResult}
+              onPrev={handlePrev}
+            />
+          )}
         </div>
       </main>
     </div>

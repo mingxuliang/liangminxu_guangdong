@@ -1,0 +1,184 @@
+# =============================================================================
+# Dify 工作流 DSL · 知识萃取「重新提取单条」Step 4 辅助工作流
+# -----------------------------------------------------------------------------
+# 功能：对单条知识进行 AI 二次优化，生成更完整准确的 2.0 版本
+# 输入：item_title + item_content + item_type + extract_goal + anchor_summary
+# 输出：optimized_content（优化后的内容字符串）
+# =============================================================================
+
+version: "0.6.0"
+kind: app
+app:
+  name: 知识萃取-重新提取单条
+  description: 对单条知识进行AI二次优化，生成更完整准确、更贴近实践落地的2.0版本内容
+  icon_type: emoji
+  icon: '🔄'
+  icon_background: '#FFF7ED'
+  mode: workflow
+  use_icon_as_answer_icon: false
+
+dependencies: []
+
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features: {}
+
+  graph:
+    nodes:
+      - id: start
+        type: custom
+        position:
+          x: 80
+          y: 160
+        positionAbsolute:
+          x: 80
+          y: 160
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: start
+          title: 开始
+          desc: ''
+          variables:
+            - variable: item_title
+              label: 知识条目标题
+              type: paragraph
+              required: true
+              max_length: 512
+            - variable: item_content
+              label: 当前知识内容（1.0版本）
+              type: paragraph
+              required: true
+              max_length: 8192
+            - variable: item_type
+              label: 知识类型（explicit/tacit/practice）
+              type: paragraph
+              required: false
+              max_length: 64
+            - variable: extract_goal
+              label: 本次萃取目标
+              type: paragraph
+              required: false
+              max_length: 4096
+            - variable: anchor_summary
+              label: 源头锚定摘要（提供上下文）
+              type: paragraph
+              required: false
+              max_length: 2048
+
+      - id: llm_reextract
+        type: custom
+        position:
+          x: 400
+          y: 160
+        positionAbsolute:
+          x: 400
+          y: 160
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: llm
+          title: AI 重新提取优化
+          desc: 基于四大目标优化单条知识内容
+          model:
+            provider: ''
+            name: ''
+            mode: chat
+            completion_params:
+              temperature: 0.4
+              max_tokens: 2048
+          context:
+            enabled: false
+            variable_selector: []
+          vision:
+            enabled: false
+          prompt_template:
+            - role: system
+              edition_type: basic
+              text: |-
+                你是企业培训知识萃取专家，专注于优化和完善单条知识内容，使其更具复用价值和实践落地性。
+
+                ## 优化的四大方向
+                1. **提升可复用性**：让内容可直接作为知识库词条、新人带教材料或微课脚本素材
+                2. **增强实践落地**：补充具体操作步骤、应用场景或注意事项，让使用者无需额外指导即可应用
+                3. **保障内容准确**：确保与课程核心目标对齐，去除模糊表述，补充必要的数据或案例
+                4. **结构清晰**：按「是什么→怎么用→用在哪」的逻辑组织内容
+
+                ## 知识类型说明
+                - explicit（显性知识）：重点优化结构和操作性，补充步骤和标准
+                - tacit（隐性知识）：重点挖掘经验背后的原则和判断标准，使之可迁移
+                - practice（优秀实践）：重点补充背景、过程和可借鉴的要素，使之可复制
+
+                ## 输出要求
+                只输出优化后的知识内容文本（纯文字，不要 JSON 格式，不要标题前缀，不要解释说明）。
+                长度控制在 100-250 字，内容完整、可直接使用。
+
+            - role: user
+              edition_type: basic
+              text: |-
+                知识标题：{{#start.item_title#}}
+
+                知识类型：{{#start.item_type#}}
+
+                当前内容（1.0版本，需要优化）：
+                {{#start.item_content#}}
+
+                本次萃取目标：{{#start.extract_goal#}}
+
+                锚定上下文：{{#start.anchor_summary#}}
+
+                请优化上述知识内容，输出更完整、更具实践价值的 2.0 版本：
+
+      - id: end
+        type: custom
+        position:
+          x: 720
+          y: 160
+        positionAbsolute:
+          x: 720
+          y: 160
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: end
+          title: 结束
+          desc: ''
+          outputs:
+            - variable: optimized_content
+              value_selector:
+                - llm_reextract
+                - text
+
+    edges:
+      - id: start-llm_reextract
+        type: custom
+        source: start
+        sourceHandle: source
+        target: llm_reextract
+        targetHandle: target
+        data:
+          sourceType: start
+          targetType: llm
+          isInIteration: false
+        zIndex: 0
+      - id: llm_reextract-end
+        type: custom
+        source: llm_reextract
+        sourceHandle: source
+        target: end
+        targetHandle: target
+        data:
+          sourceType: llm
+          targetType: end
+          isInIteration: false
+        zIndex: 0

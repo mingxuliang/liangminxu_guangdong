@@ -200,6 +200,158 @@ function buildMockFilterItems(inputs) {
   ];
 }
 
+// ── Step 3：结构化提炼 ───────────────────────────────────────────────────────
+
+export async function runKeRefineWorkflow(inputs) {
+  const apiKey = process.env.KE_REFINE_API_KEY?.trim();
+  if (!apiKey) {
+    return { mock: true, structured_result: buildMockRefinementResult(inputs) };
+  }
+
+  const user = process.env.KE_ANCHOR_USER?.trim() || 'knowledge-extraction-refine';
+  const url = `${getV1Root()}/workflows/run`;
+  const timeoutMs = Number(process.env.KE_ANCHOR_TIMEOUT_MS || 180000);
+
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+      body: JSON.stringify({ inputs, response_mode: 'blocking', user }),
+    });
+  } finally {
+    clearTimeout(tid);
+  }
+
+  const rawText = await res.text();
+  if (!res.ok) throw new Error(`Dify Refine Workflow ${res.status}: ${rawText.slice(0, 800)}`);
+
+  let json;
+  try { json = JSON.parse(rawText); } catch { throw new Error('Dify 返回非 JSON'); }
+
+  const data = json.data;
+  const status = String(data?.status ?? '');
+  if (status === 'failed' || status === 'error') {
+    throw new Error(data?.error || json.message || '结构化提炼工作流执行失败');
+  }
+
+  const rawOut = data?.outputs?.structured_result;
+  const text = typeof rawOut === 'string' ? rawOut : JSON.stringify(rawOut ?? {});
+
+  let structured_result;
+  try {
+    const cleaned = stripJsonFence(text);
+    structured_result = JSON.parse(cleaned);
+  } catch {
+    try {
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error('未找到 JSON 对象');
+      structured_result = JSON.parse(match[0]);
+    } catch {
+      structured_result = buildMockRefinementResult(inputs);
+      structured_result._raw = text.slice(0, 800);
+    }
+  }
+
+  return { mock: false, structured_result };
+}
+
+function buildMockRefinementResult(inputs) {
+  const goal = inputs.extract_goal || '（未填写）';
+  return {
+    core_knowledge: [
+      {
+        id: 'ck1', title: `【演示】${goal.slice(0, 18)} - 核心方法`,
+        type: '方法论',
+        content: '未配置 KE_REFINE_API_KEY，当前显示演示数据。导入 ke-03 工作流并配置 Key 后可获取真实提炼成果。',
+        tags: ['演示', '待配置'],
+      },
+    ],
+    case_materials: [
+      {
+        id: 'cm1', title: '【演示】案例素材示例',
+        source: '演示数据',
+        content: '请在 .env.local 配置 KE_REFINE_API_KEY 后重试。',
+        highlight: '配置Key后显示真实案例',
+      },
+    ],
+    practical_tools: [
+      {
+        id: 'pt1', title: '【演示】工具模板示例',
+        format: '模板',
+        desc: '配置 KE_REFINE_API_KEY 并导入 dify/ke-03-structured-refinement.dsl.yml 后可获取真实工具建议。',
+      },
+    ],
+    optimization_suggestions: [
+      {
+        id: 'os1',
+        content: '配置 KE_REFINE_API_KEY 后，AI 将基于四大萃取目标给出具体优化建议。',
+        priority: 'high',
+      },
+    ],
+  };
+}
+
+// ── Step 4：重新提取单条 ─────────────────────────────────────────────────────
+
+export async function runKeReextractWorkflow(inputs) {
+  const apiKey = process.env.KE_REEXTRACT_API_KEY?.trim();
+  if (!apiKey) {
+    return { mock: true, optimized_content: buildMockOptimizedContent(inputs) };
+  }
+
+  const user = process.env.KE_ANCHOR_USER?.trim() || 'knowledge-extraction-reextract';
+  const url = `${getV1Root()}/workflows/run`;
+  const timeoutMs = Number(process.env.KE_ANCHOR_TIMEOUT_MS || 120000);
+
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+      body: JSON.stringify({ inputs, response_mode: 'blocking', user }),
+    });
+  } finally {
+    clearTimeout(tid);
+  }
+
+  const rawText = await res.text();
+  if (!res.ok) throw new Error(`Dify Reextract Workflow ${res.status}: ${rawText.slice(0, 800)}`);
+
+  let json;
+  try { json = JSON.parse(rawText); } catch { throw new Error('Dify 返回非 JSON'); }
+
+  const data = json.data;
+  const status = String(data?.status ?? '');
+  if (status === 'failed' || status === 'error') {
+    throw new Error(data?.error || json.message || '重新提取工作流执行失败');
+  }
+
+  const rawOut = data?.outputs?.optimized_content;
+  const optimized_content = typeof rawOut === 'string' ? rawOut.trim() : buildMockOptimizedContent(inputs);
+
+  return { mock: false, optimized_content };
+}
+
+function buildMockOptimizedContent(inputs) {
+  const base = inputs.item_content || '';
+  return `${base}\n\n【AI二次优化】经深度分析，该知识点在实际应用中需结合具体业务场景灵活调整，建议配合案例库使用，可提升学员理解效率。（请配置 KE_REEXTRACT_API_KEY 并导入 ke-04 工作流以获取真实 AI 优化内容）`;
+}
+
 // ── Step 1：源头锚定（保持在下方）──────────────────────────────────────────
 
 function buildMockAnchorPackage(inputs) {

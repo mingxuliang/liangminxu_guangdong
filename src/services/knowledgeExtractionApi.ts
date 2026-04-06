@@ -101,6 +101,81 @@ export async function keRunFilter(sessionId: string): Promise<KeSession & { filt
   return JSON.parse(text) as KeSession & { filter_items?: KnowledgeItem[] };
 }
 
+// ──────── Step 3 & 4 类型 ────────────────────────────────────────────────────
+
+export type RefinementCoreKnowledge = {
+  id: string;
+  title: string;
+  type: string;
+  content: string;
+  tags: string[];
+};
+
+export type RefinementCaseMaterial = {
+  id: string;
+  title: string;
+  source: string;
+  content: string;
+  highlight: string;
+};
+
+export type RefinementPracticalTool = {
+  id: string;
+  title: string;
+  format: string;
+  desc: string;
+};
+
+export type RefinementOptimizationSuggestion = {
+  id: string;
+  content: string;
+  priority: 'high' | 'medium';
+};
+
+export type RefinementResult = {
+  core_knowledge: RefinementCoreKnowledge[];
+  case_materials: RefinementCaseMaterial[];
+  practical_tools: RefinementPracticalTool[];
+  optimization_suggestions: RefinementOptimizationSuggestion[];
+};
+
+export async function keRunRefine(sessionId: string): Promise<KeSession & { refine_result?: RefinementResult; refine_status?: string; refine_error?: string | null }> {
+  const r = await fetch(url(`/knowledge-extraction/sessions/${sessionId}/refine/run`), {
+    method: 'POST',
+  });
+  const text = await r.text();
+  if (!r.ok) {
+    try {
+      const j = JSON.parse(text) as { error?: string };
+      throw new Error(j.error || text);
+    } catch {
+      throw new Error(text);
+    }
+  }
+  return JSON.parse(text) as KeSession & { refine_result?: RefinementResult; refine_status?: string; refine_error?: string | null };
+}
+
+export async function keReextractItem(
+  sessionId: string,
+  item: { item_title: string; item_content: string; item_type: string },
+): Promise<{ optimized_content: string; mock?: boolean }> {
+  const r = await fetch(url(`/knowledge-extraction/sessions/${sessionId}/reextract`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item),
+  });
+  const text = await r.text();
+  if (!r.ok) {
+    try {
+      const j = JSON.parse(text) as { error?: string };
+      throw new Error(j.error || text);
+    } catch {
+      throw new Error(text);
+    }
+  }
+  return JSON.parse(text) as { optimized_content: string; mock?: boolean };
+}
+
 export async function keRunAnchor(sessionId: string): Promise<KeSession> {
   const r = await fetch(url(`/knowledge-extraction/sessions/${sessionId}/anchor/run`), {
     method: 'POST',

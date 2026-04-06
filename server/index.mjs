@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import multer from 'multer';
 
-import { runKeAnchorWorkflow, runKeFilterWorkflow } from './lib/difyClient.mjs';
+import { runKeAnchorWorkflow, runKeFilterWorkflow, runKeRefineWorkflow, runKeReextractWorkflow } from './lib/difyClient.mjs';
 import { extractTextFromFile, mergeMaterialLines } from './lib/extractText.mjs';
 import { isOssConfigured, putLocalFileToOss } from './lib/ossUpload.mjs';
 import { createSessionRecord, loadSession, saveSession } from './lib/store.mjs';
@@ -185,6 +185,7 @@ app.post('/api/knowledge-extraction/sessions/:id/anchor/run', async (req, res) =
     s.status = 'failed';
     s.error_message = String(e?.message || e);
     saveSession(s);
+    console.error('[anchor/run] 失败:', s.error_message);
     res.status(500).json({ error: s.error_message, session: s });
   }
 });
@@ -222,7 +223,73 @@ app.post('/api/knowledge-extraction/sessions/:id/filter/run', async (req, res) =
     s.filter_status = 'failed';
     s.filter_error = String(e?.message || e);
     saveSession(s);
+    console.error('[filter/run] 失败:', s.filter_error);
     res.status(500).json({ error: s.filter_error, session: s });
+  }
+});
+
+app.post('/api/knowledge-extraction/sessions/:id/refine/run', async (req, res) => {
+  const s = loadSession(req.params.id);
+  if (!s) return res.status(404).json({ error: 'not_found' });
+
+  if (!s.filter_items || s.filter_items.length === 0) {
+    return res.status(400).json({ error: 'filter_required: 请先完成分层筛选（Step 2）' });
+  }
+
+  s.refine_status = 'running';
+  s.refine_error = null;
+  saveSession(s);
+
+  try {
+    const selectedItems = (s.filter_items || []).filter(item => item.selected !== false);
+    const inputs = {
+      anchor_package: JSON.stringify(s.anchor_package || {}),
+      filter_items_json: JSON.stringify(selectedItems),
+      extract_goal: s.extract_goal || '',
+      target_audience: s.target_audience || '',
+    };
+
+    const result = await runKeRefineWorkflow(inputs);
+    s.refine_result = result.structured_result;
+    s.refine_status = 'ready';
+    s.refine_error = result.mock
+      ? 'mock: 未配置 KE_REFINE_API_KEY，返回演示数据'
+      : null;
+    saveSession(s);
+    res.json(s);
+  } catch (e) {
+    s.refine_status = 'failed';
+    s.refine_error = String(e?.message || e);
+    saveSession(s);
+    console.error('[refine/run] 失败:', s.refine_error);
+    res.status(500).json({ error: s.refine_error, session: s });
+  }
+});
+
+app.post('/api/knowledge-extraction/sessions/:id/reextract', async (req, res) => {
+  const s = loadSession(req.params.id);
+  if (!s) return res.status(404).json({ error: 'not_found' });
+
+  const { item_title, item_content, item_type } = req.body || {};
+  if (!item_title || !item_content) {
+    return res.status(400).json({ error: 'item_title 和 item_content 必填' });
+  }
+
+  try {
+    const anchorSummary = s.anchor_package?.anchor_summary || '';
+    const inputs = {
+      item_title: String(item_title),
+      item_content: String(item_content),
+      item_type: String(item_type || 'explicit'),
+      extract_goal: s.extract_goal || '',
+      anchor_summary: anchorSummary.slice(0, 500),
+    };
+
+    const result = await runKeReextractWorkflow(inputs);
+    res.json({ optimized_content: result.optimized_content, mock: result.mock });
+  } catch (e) {
+    console.error('[reextract] 失败:', String(e?.message || e));
+    res.status(500).json({ error: String(e?.message || e) });
   }
 });
 

@@ -1,90 +1,116 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { keRunRefine, type RefinementResult } from '../../../services/knowledgeExtractionApi';
 
 interface StructuredRefinementStepProps {
-  onNext: () => void;
+  sessionId: string | null;
+  onNext: (result: RefinementResult) => void;
   onPrev: () => void;
 }
 
-const refinementData = {
-  coreKnowledge: [
-    {
-      id: 'ck1',
-      title: '知识萃取五步法模型',
-      type: '方法论',
-      content: '源头锚定 → 分层筛选 → 结构化提炼 → 校验闭环 → 成果输出。每步有明确的输入输出标准，确保萃取过程可控、可复现。',
-      tags: ['核心方法', '可复用', '工具化'],
-    },
-    {
-      id: 'ck2',
-      title: '需求分析三要素识别法',
-      type: '实操步骤',
-      content: '业务痛点识别（What）→ 根因分析（Why）→ 解决方案设计（How）。配合访谈提纲使用，确保需求分析不遗漏关键信息。',
-      tags: ['需求分析', '访谈工具', '三步法'],
-    },
-    {
-      id: 'ck3',
-      title: '三级大纲MECE设计原则',
-      type: '知识点',
-      content: '一级：课程模块（3-5个）；二级：知识单元；三级：具体知识点。遵循MECE原则（相互独立、完全穷尽），避免知识点重叠或遗漏。',
-      tags: ['大纲设计', 'MECE', '结构化'],
-    },
-  ],
-  caseMaterials: [
-    {
-      id: 'cm1',
-      title: '销售培训萃取成功案例',
-      source: '学员第3组',
-      content: '将《销售技巧》课程萃取为"客户拜访七步法"工具卡，已在团队推广使用，3个月内销售转化率提升18%。',
-      highlight: '工具化落地，效果可量化',
-    },
-    {
-      id: 'cm2',
-      title: '讲师经验：判断学员理解度',
-      source: '主讲讲师',
-      content: '不要问"听懂了吗"，要让学员复述或举例。观察眼神和肢体语言，关键节点设置小测验，通过率低于70%需重讲。',
-      highlight: '隐性经验显性化',
-    },
-  ],
-  practicalTools: [
-    {
-      id: 'pt1',
-      title: '知识萃取访谈提纲模板',
-      format: 'Word模板',
-      desc: '包含15个核心问题，覆盖显性知识、隐性经验、避坑技巧三大维度',
-    },
-    {
-      id: 'pt2',
-      title: '知识分类筛选矩阵',
-      format: 'Excel工具',
-      desc: '按优先级×可复用性双维度评估，自动生成筛选建议',
-    },
-    {
-      id: 'pt3',
-      title: '萃取成果质量检查清单',
-      format: '检查表',
-      desc: '20项质量标准，确保萃取内容准确、完整、可落地',
-    },
-  ],
-  optimizationSuggestions: [
-    { id: 'os1', content: '建议将"五步法模型"制作为可视化流程图，便于学员快速记忆和应用', priority: 'high' },
-    { id: 'os2', content: '讲师经验部分建议录制短视频（3-5分钟），保留语气和情境，提升传承效果', priority: 'high' },
-    { id: 'os3', content: '案例素材建议补充失败案例，形成"成功-失败"对比，加深学员理解', priority: 'medium' },
-    { id: 'os4', content: '实操工具建议增加使用说明和填写示例，降低使用门槛', priority: 'medium' },
-  ],
-};
-
 type TabKey = 'core' | 'case' | 'tool' | 'suggest';
 
-const StructuredRefinementStep = ({ onNext, onPrev }: StructuredRefinementStepProps) => {
+const StructuredRefinementStep = ({ sessionId, onNext, onPrev }: StructuredRefinementStepProps) => {
   const [activeTab, setActiveTab] = useState<TabKey>('core');
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isMock, setIsMock] = useState(false);
+  const [result, setResult] = useState<RefinementResult | null>(null);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    setLoading(true);
+    setError(null);
+    keRunRefine(sessionId)
+      .then(s => {
+        const r = s.refine_result;
+        if (r && (r.core_knowledge?.length || r.case_materials?.length)) {
+          setResult(r);
+          setIsMock(Boolean(s.refine_error?.startsWith('mock')));
+        } else {
+          setError('结构化提炼返回数据为空，请检查工作流配置');
+        }
+      })
+      .catch(e => setError(String(e?.message ?? e)))
+      .finally(() => setLoading(false));
+  }, [sessionId]);
 
   const tabs: { key: TabKey; label: string; icon: string; count: number }[] = [
-    { key: 'core', label: '核心知识', icon: 'ri-star-line', count: refinementData.coreKnowledge.length },
-    { key: 'case', label: '案例素材', icon: 'ri-file-copy-2-line', count: refinementData.caseMaterials.length },
-    { key: 'tool', label: '实操工具', icon: 'ri-tools-line', count: refinementData.practicalTools.length },
-    { key: 'suggest', label: '优化建议', icon: 'ri-lightbulb-line', count: refinementData.optimizationSuggestions.length },
+    { key: 'core', label: '核心知识', icon: 'ri-star-line', count: result?.core_knowledge?.length ?? 0 },
+    { key: 'case', label: '案例素材', icon: 'ri-file-copy-2-line', count: result?.case_materials?.length ?? 0 },
+    { key: 'tool', label: '实操工具', icon: 'ri-tools-line', count: result?.practical_tools?.length ?? 0 },
+    { key: 'suggest', label: '优化建议', icon: 'ri-lightbulb-line', count: result?.optimization_suggestions?.length ?? 0 },
   ];
+
+  // ── Loading ──────────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-4 h-full">
+        <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-2xl p-4 text-white">
+          <p className="text-sm font-bold mb-1">结构化提炼</p>
+          <p className="text-xs text-blue-200">AI 正在将筛选后的知识整合为四层结构成果，请稍候…</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-gray-100 flex-1 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-4 text-center px-6">
+            <div className="w-14 h-14 flex items-center justify-center bg-blue-50 rounded-2xl">
+              <i className="ri-loader-4-line text-blue-500 text-2xl animate-spin" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-gray-800 mb-1">正在结构化提炼…</p>
+              <p className="text-xs text-gray-400">AI 正在将知识条目整合为核心知识、案例素材、实操工具、优化建议四层结构，通常需要 30-90 秒</p>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center justify-between">
+          <button type="button" onClick={onPrev} className="flex items-center gap-2 px-4 py-2 text-xs text-gray-500 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer whitespace-nowrap">
+            <i className="ri-arrow-left-line" />返回上一步
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Error ────────────────────────────────────────────────────────────────
+  if (error) {
+    return (
+      <div className="flex flex-col gap-4 h-full">
+        <div className="bg-gradient-to-r from-red-500 to-red-600 rounded-2xl p-4 text-white">
+          <p className="text-sm font-bold mb-1">结构化提炼</p>
+          <p className="text-xs text-red-100">提炼过程遇到问题，请检查配置或重试</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-gray-100 flex-1 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-4 text-center px-6 max-w-sm">
+            <div className="w-14 h-14 flex items-center justify-center bg-red-50 rounded-2xl">
+              <i className="ri-error-warning-line text-red-400 text-2xl" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-gray-800 mb-2">结构化提炼失败</p>
+              <p className="text-xs text-gray-500 leading-relaxed bg-gray-50 rounded-xl p-3 text-left">{error}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setError(null); setLoading(true); if (sessionId) keRunRefine(sessionId).then(s => { setResult(s.refine_result ?? null); setIsMock(Boolean(s.refine_error?.startsWith('mock'))); }).catch(e => setError(String(e?.message ?? e))).finally(() => setLoading(false)); }}
+              className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white text-xs font-semibold rounded-xl hover:bg-blue-700 transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <i className="ri-refresh-line" />重新提炼
+            </button>
+          </div>
+        </div>
+        <div className="flex items-center justify-between">
+          <button type="button" onClick={onPrev} className="flex items-center gap-2 px-4 py-2 text-xs text-gray-500 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer whitespace-nowrap">
+            <i className="ri-arrow-left-line" />返回上一步
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!result) return null;
+
+  const coreList = result.core_knowledge ?? [];
+  const caseList = result.case_materials ?? [];
+  const toolList = result.practical_tools ?? [];
+  const suggestList = result.optimization_suggestions ?? [];
 
   return (
     <div className="flex flex-col gap-4 h-full">
@@ -92,14 +118,19 @@ const StructuredRefinementStep = ({ onNext, onPrev }: StructuredRefinementStepPr
       <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-2xl p-4 text-white">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-bold mb-1">结构化提炼成果</p>
-            <p className="text-xs text-blue-200">按「核心知识 - 案例素材 - 实操工具 - 优化建议」四层架构梳理，逻辑清晰、重点突出</p>
+            <div className="flex items-center gap-2 mb-1">
+              <p className="text-sm font-bold">结构化提炼成果</p>
+              {isMock && (
+                <span className="text-[10px] bg-white/20 text-white px-2 py-0.5 rounded-full">演示数据</span>
+              )}
+            </div>
+            <p className="text-xs text-blue-200">按「核心知识 - 案例素材 - 实操工具 - 优化建议」四层架构梳理</p>
           </div>
           <div className="flex items-center gap-4">
             {[
-              { label: '知识条目', value: '3' },
-              { label: '案例素材', value: '2' },
-              { label: '实操工具', value: '3' },
+              { label: '知识条目', value: String(coreList.length) },
+              { label: '案例素材', value: String(caseList.length) },
+              { label: '实操工具', value: String(toolList.length) },
             ].map(stat => (
               <div key={stat.label} className="text-center">
                 <p className="text-xl font-bold">{stat.value}</p>
@@ -134,22 +165,15 @@ const StructuredRefinementStep = ({ onNext, onPrev }: StructuredRefinementStepPr
               </span>
             </button>
           ))}
-          <div className="ml-auto flex items-center gap-2 pb-2">
-            <button
-              type="button"
-              className="flex items-center gap-1 px-3 py-1.5 text-[10px] text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <i className="ri-add-line text-xs" />
-              添加条目
-            </button>
-          </div>
         </div>
 
         {/* Tab body */}
         <div className="flex-1 overflow-y-auto p-4">
           {activeTab === 'core' && (
             <div className="space-y-3">
-              {refinementData.coreKnowledge.map(item => (
+              {coreList.length === 0 ? (
+                <div className="text-center py-10 text-xs text-gray-400">暂无核心知识条目</div>
+              ) : coreList.map(item => (
                 <div key={item.id} className="border border-gray-100 rounded-xl p-4 hover:border-blue-200 transition-all group">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1">
@@ -157,7 +181,7 @@ const StructuredRefinementStep = ({ onNext, onPrev }: StructuredRefinementStepPr
                         <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
                           {item.type}
                         </span>
-                        {item.tags.map(tag => (
+                        {(item.tags ?? []).map(tag => (
                           <span key={tag} className="text-[10px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{tag}</span>
                         ))}
                       </div>
@@ -182,12 +206,6 @@ const StructuredRefinementStep = ({ onNext, onPrev }: StructuredRefinementStepPr
                       >
                         <i className="ri-edit-line text-xs" />
                       </button>
-                      <button
-                        type="button"
-                        className="w-7 h-7 flex items-center justify-center text-gray-400 hover:text-red-400 hover:bg-red-50 rounded-lg transition-all cursor-pointer"
-                      >
-                        <i className="ri-delete-bin-line text-xs" />
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -197,7 +215,9 @@ const StructuredRefinementStep = ({ onNext, onPrev }: StructuredRefinementStepPr
 
           {activeTab === 'case' && (
             <div className="space-y-3">
-              {refinementData.caseMaterials.map(item => (
+              {caseList.length === 0 ? (
+                <div className="text-center py-10 text-xs text-gray-400">暂无案例素材</div>
+              ) : caseList.map(item => (
                 <div key={item.id} className="border border-gray-100 rounded-xl p-4 hover:border-blue-200 transition-all">
                   <div className="flex items-start gap-3">
                     <div className="w-8 h-8 flex items-center justify-center bg-sky-100 rounded-xl flex-shrink-0">
@@ -222,7 +242,9 @@ const StructuredRefinementStep = ({ onNext, onPrev }: StructuredRefinementStepPr
 
           {activeTab === 'tool' && (
             <div className="grid grid-cols-3 gap-3">
-              {refinementData.practicalTools.map(item => (
+              {toolList.length === 0 ? (
+                <div className="col-span-3 text-center py-10 text-xs text-gray-400">暂无实操工具</div>
+              ) : toolList.map(item => (
                 <div key={item.id} className="border border-gray-100 rounded-xl p-4 hover:border-blue-200 transition-all cursor-pointer group">
                   <div className="w-10 h-10 flex items-center justify-center bg-blue-50 rounded-xl mb-3 group-hover:bg-blue-100 transition-colors">
                     <i className="ri-tools-line text-blue-500 text-base" />
@@ -230,13 +252,6 @@ const StructuredRefinementStep = ({ onNext, onPrev }: StructuredRefinementStepPr
                   <p className="text-xs font-bold text-gray-800 mb-1">{item.title}</p>
                   <span className="text-[10px] text-blue-500 bg-blue-50 px-2 py-0.5 rounded-full">{item.format}</span>
                   <p className="text-[11px] text-gray-500 mt-2 leading-relaxed">{item.desc}</p>
-                  <button
-                    type="button"
-                    className="mt-3 w-full flex items-center justify-center gap-1 py-1.5 text-[10px] text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer whitespace-nowrap"
-                  >
-                    <i className="ri-download-line text-xs" />
-                    下载模板
-                  </button>
                 </div>
               ))}
             </div>
@@ -244,7 +259,9 @@ const StructuredRefinementStep = ({ onNext, onPrev }: StructuredRefinementStepPr
 
           {activeTab === 'suggest' && (
             <div className="space-y-3">
-              {refinementData.optimizationSuggestions.map((item, idx) => (
+              {suggestList.length === 0 ? (
+                <div className="text-center py-10 text-xs text-gray-400">暂无优化建议</div>
+              ) : suggestList.map((item, idx) => (
                 <div key={item.id} className="flex items-start gap-3 border border-gray-100 rounded-xl p-4 hover:border-blue-200 transition-all">
                   <div className={`w-6 h-6 flex items-center justify-center rounded-full flex-shrink-0 text-xs font-bold ${
                     item.priority === 'high' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'
@@ -279,7 +296,7 @@ const StructuredRefinementStep = ({ onNext, onPrev }: StructuredRefinementStepPr
         </button>
         <button
           type="button"
-          onClick={onNext}
+          onClick={() => onNext(result)}
           className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors cursor-pointer whitespace-nowrap"
         >
           进入校验闭环

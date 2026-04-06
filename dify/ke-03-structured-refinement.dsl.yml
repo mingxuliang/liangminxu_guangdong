@@ -1,0 +1,220 @@
+# =============================================================================
+# Dify 工作流 DSL · 知识萃取「结构化提炼」Step 3
+# -----------------------------------------------------------------------------
+# 输入：anchor_package（Step1）+ filter_items_json（Step2已选条目）+ 目标信息
+# 输出：structured_result（JSON字符串，含4个模块）
+# 注意：version 必须字符串；LLM 节点必须含 context / vision 字段
+# =============================================================================
+
+version: "0.6.0"
+kind: app
+app:
+  name: 知识萃取-结构化提炼
+  description: 将分层筛选的知识条目整合提炼为「核心知识-案例素材-实操工具-优化建议」四层结构成果
+  icon_type: emoji
+  icon: '🏗️'
+  icon_background: '#F0FDF4'
+  mode: workflow
+  use_icon_as_answer_icon: false
+
+dependencies: []
+
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features: {}
+
+  graph:
+    nodes:
+      - id: start
+        type: custom
+        position:
+          x: 80
+          y: 160
+        positionAbsolute:
+          x: 80
+          y: 160
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: start
+          title: 开始
+          desc: ''
+          variables:
+            - variable: anchor_package
+              label: Step1锚定包（JSON字符串）
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: filter_items_json
+              label: Step2已选知识条目（JSON数组字符串）
+              type: paragraph
+              required: false
+              max_length: 60000
+            - variable: extract_goal
+              label: 萃取目标
+              type: paragraph
+              required: false
+              max_length: 8192
+            - variable: target_audience
+              label: 目标受众
+              type: paragraph
+              required: false
+              max_length: 4096
+
+      - id: llm_refine
+        type: custom
+        position:
+          x: 400
+          y: 160
+        positionAbsolute:
+          x: 400
+          y: 160
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: llm
+          title: 结构化提炼
+          desc: 将知识条目整合为四层结构成果，输出 JSON
+          model:
+            provider: ''
+            name: ''
+            mode: chat
+            completion_params:
+              temperature: 0.3
+              max_tokens: 6000
+          context:
+            enabled: false
+            variable_selector: []
+          vision:
+            enabled: false
+          prompt_template:
+            - role: system
+              edition_type: basic
+              text: |-
+                你是企业培训知识萃取专家，专注于将筛选后的知识条目整合提炼为结构清晰、可直接落地的知识资产。
+
+                ## 萃取的四大核心目标
+                1. **沉淀可复用资产**：将知识点转化为标准化、可传承的资产，服务于企业知识库、新人带教、复训
+                2. **衔接课程全闭环**：为后续微课脚本、工具包等衍生产品提供精准素材
+                3. **保障内容一致性**：确保成果与课程核心目标、学员需求完全对齐
+                4. **赋能实践落地**：成果需贴合学员真实工作场景，可直接套用
+
+                ## 你的任务
+                将输入的知识条目整合提炼为「四层结构化成果」。
+
+                ## 输出要求
+                只输出一个合法 JSON 对象（不要 Markdown 代码围栏，不要任何多余文字）：
+                {
+                  "core_knowledge": [
+                    {
+                      "id": "ck1",
+                      "title": "知识标题（10-25字，体现核心价值）",
+                      "type": "方法论或知识点或操作步骤或经验技巧",
+                      "content": "标准化内容（100-200字，包含：定义+应用方法+价值说明，可直接作为知识库词条）",
+                      "tags": ["标签1", "标签2", "标签3"]
+                    }
+                  ],
+                  "case_materials": [
+                    {
+                      "id": "cm1",
+                      "title": "案例标题",
+                      "source": "来源（如：讲师经验/学员实践/课堂案例）",
+                      "content": "案例内容（含背景+做法+结果，80-150字）",
+                      "highlight": "核心亮点（一句话，10-20字）"
+                    }
+                  ],
+                  "practical_tools": [
+                    {
+                      "id": "pt1",
+                      "title": "工具/模板名称",
+                      "format": "检查表或模板或工具卡或操作手册",
+                      "desc": "工具描述（含适用场景和使用价值，50-100字）"
+                    }
+                  ],
+                  "optimization_suggestions": [
+                    {
+                      "id": "os1",
+                      "content": "优化建议（具体可操作，说明建议方向和预期价值）",
+                      "priority": "high或medium"
+                    }
+                  ]
+                }
+
+                ## 整合规则
+                - core_knowledge：从 explicit/tacit 类型条目中提炼，重点突出可复用的核心知识，3-6条
+                - case_materials：从 practice 类型和隐性经验中提炼，每条必须有具体事例，2-4条
+                - practical_tools：基于知识条目推导出可制作的工具/模板/检查单，2-4条（即使原始条目未明确提及也可推导）
+                - optimization_suggestions：提出提升成果质量的具体建议，3-5条，high优先级2条，medium 1-3条
+                - 所有内容必须与锚定的 scope_in 保持一致，不得超出范围
+                - 确保输出可被 JSON.parse 直接解析
+
+            - role: user
+              edition_type: basic
+              text: |-
+                # 源头锚定结果
+                {{#start.anchor_package#}}
+
+                # 萃取目标
+                {{#start.extract_goal#}}
+
+                # 目标受众
+                {{#start.target_audience#}}
+
+                # 已筛选知识条目（来自Step2）
+                {{#start.filter_items_json#}}
+
+                请基于以上内容，输出结构化提炼成果（JSON 对象）：
+
+      - id: end
+        type: custom
+        position:
+          x: 720
+          y: 160
+        positionAbsolute:
+          x: 720
+          y: 160
+        width: 242
+        height: 98
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: end
+          title: 结束
+          desc: ''
+          outputs:
+            - variable: structured_result
+              value_selector:
+                - llm_refine
+                - text
+
+    edges:
+      - id: start-llm_refine
+        type: custom
+        source: start
+        sourceHandle: source
+        target: llm_refine
+        targetHandle: target
+        data:
+          sourceType: start
+          targetType: llm
+          isInIteration: false
+        zIndex: 0
+      - id: llm_refine-end
+        type: custom
+        source: llm_refine
+        sourceHandle: source
+        target: end
+        targetHandle: target
+        data:
+          sourceType: llm
+          targetType: end
+          isInIteration: false
+        zIndex: 0
