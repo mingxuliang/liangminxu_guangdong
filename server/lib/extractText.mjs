@@ -117,61 +117,130 @@ function safeAudioUploadFilename(ext) {
   return `ke-audio-${Date.now()}.${ext}`;
 }
 
-// ── 音频：调用 Dify audio-to-text → 可选调用精炼工作流 ──────────────────────
+/** 硅基流动 OpenAPI：POST /v1/audio/transcriptions，multipart：file + model，响应 { text } */
+function siliconflowAsrUrl() {
+  const raw = (process.env.SILICONFLOW_BASE_URL || 'https://api.siliconflow.cn/v1').trim().replace(/\/$/, '');
+  return `${raw}/audio/transcriptions`;
+}
+
+function siliconflowAsrModel() {
+  return (process.env.SILICONFLOW_ASR_MODEL || 'FunAudioLLM/SenseVoiceSmall').trim();
+}
+
+function siliconflowApiKey() {
+  return (process.env.SILICONFLOW_API_KEY || process.env.KE_SILICONFLOW_ASR_API_KEY || '').trim();
+}
+
+/** @returns {Promise<string>} 原始转写文本 */
+async function transcribeWithSiliconFlow(filePath, originalName) {
+  const apiKey = siliconflowApiKey();
+  if (!apiKey) throw new Error('SILICONFLOW_API_KEY 未配置');
+
+  const buf = fs.readFileSync(filePath);
+  const ext = resolveAudioExt(filePath, originalName);
+  const mime = mimeFromExt(ext);
+  const uploadName = safeAudioUploadFilename(ext);
+  const form = new FormData();
+  const FileCtor = globalThis.File;
+  if (typeof FileCtor === 'function') {
+    form.append('file', new FileCtor([buf], uploadName, { type: mime }));
+  } else {
+    form.append('file', new Blob([buf], { type: mime }), uploadName);
+  }
+  form.append('model', siliconflowAsrModel());
+
+  const res = await fetch(siliconflowAsrUrl(), {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`HTTP ${res.status}: ${errText.slice(0, 300)}`);
+  }
+
+  const json = await res.json();
+  const text = (json.text || '').trim();
+  if (!text) throw new Error('转写结果为空');
+  return text;
+}
+
+/** @returns {Promise<string>} 原始转写文本 */
+async function transcribeWithDifyAudioToText(filePath, originalName, apiKey) {
+  const raw = (process.env.DIFY_BASE_URL || '').trim() || 'http://127.0.0.1:8088/v1';
+  const base = raw.replace(/\/$/, '');
+  const v1Root = /\/v1$/i.test(base) ? base : `${base}/v1`;
+
+  const buf = fs.readFileSync(filePath);
+  const ext = resolveAudioExt(filePath, originalName);
+  const mime = mimeFromExt(ext);
+  const uploadName = safeAudioUploadFilename(ext);
+  const form = new FormData();
+  const FileCtor = globalThis.File;
+  if (typeof FileCtor === 'function') {
+    form.append('file', new FileCtor([buf], uploadName, { type: mime }));
+  } else {
+    form.append('file', new Blob([buf], { type: mime }), uploadName);
+  }
+  form.append('user', 'knowledge-extraction');
+
+  const res = await fetch(`${v1Root}/audio-to-text`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`HTTP ${res.status}: ${errText.slice(0, 300)}`);
+  }
+
+  const json = await res.json();
+  const text = (json.text || '').trim();
+  if (!text) throw new Error('转写结果为空');
+  return text;
+}
+
+// ── 音频：硅基流动 ASR 优先 → 否则 Dify audio-to-text → 可选精炼工作流 ───
 export async function transcribeAudio(filePath, originalName, sessionContext = {}) {
   // sessionContext 可传入 { extract_goal, course_title, target_audience }，用于精炼工作流
-  const apiKey = (
+  const sfKey = siliconflowApiKey();
+  const difyKey = (
     process.env.KE_AUDIO_TO_TEXT_API_KEY ||
     process.env.KE_ANCHOR_API_KEY ||
     ''
   ).trim();
 
-  if (!apiKey) {
+  if (!sfKey && !difyKey) {
     return [
       `[音频文件已上传: ${originalName}]`,
-      `提示：配置 KE_AUDIO_TO_TEXT_API_KEY 后可自动转写。当前为占位描述，请在萃取目标中手动补充该音频的核心内容摘要。`,
+      `提示：配置 SILICONFLOW_API_KEY（硅基流动 ASR）或 KE_AUDIO_TO_TEXT_API_KEY（Dify）后可自动转写。当前为占位描述，请在萃取目标中手动补充该音频的核心内容摘要。`,
     ].join('\n');
   }
 
-  const raw = (process.env.DIFY_BASE_URL || '').trim() || 'http://127.0.0.1:8088/v1';
-  const base = raw.replace(/\/$/, '');
-  const v1Root = /\/v1$/i.test(base) ? base : `${base}/v1`;
-
-  // ── 第一步：音频 → 原始文字（Dify audio-to-text API）────────────────────
+  // ── 第一步：音频 → 原始文字（优先硅基流动，失败且存在 Dify Key 时回退 Dify）──
   let rawTranscript = '';
   try {
-    const buf = fs.readFileSync(filePath);
-    const ext = resolveAudioExt(filePath, originalName);
-    const mime = mimeFromExt(ext);
-    const uploadName = safeAudioUploadFilename(ext);
-    const form = new FormData();
-    const FileCtor = globalThis.File;
-    if (typeof FileCtor === 'function') {
-      form.append('file', new FileCtor([buf], uploadName, { type: mime }));
+    if (sfKey) {
+      try {
+        rawTranscript = await transcribeWithSiliconFlow(filePath, originalName);
+      } catch (sfErr) {
+        if (difyKey) {
+          console.warn(`[asr] 硅基流动转写失败，回退 Dify: ${sfErr.message}`);
+          rawTranscript = await transcribeWithDifyAudioToText(filePath, originalName, difyKey);
+        } else {
+          throw sfErr;
+        }
+      }
     } else {
-      form.append('file', new Blob([buf], { type: mime }), uploadName);
+      rawTranscript = await transcribeWithDifyAudioToText(filePath, originalName, difyKey);
     }
-    form.append('user', 'knowledge-extraction');
-
-    const res = await fetch(`${v1Root}/audio-to-text`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: form,
-    });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`HTTP ${res.status}: ${errText.slice(0, 300)}`);
-    }
-
-    const json = await res.json();
-    rawTranscript = (json.text || '').trim();
-    if (!rawTranscript) return `[音频转写结果为空: ${originalName}]`;
   } catch (e) {
-    return [
-      `[音频转写失败（${originalName}）: ${e.message}]`,
-      `请确认 Dify 实例已配置语音转文字模型，或在萃取目标中手动补充音频内容摘要。`,
-    ].join('\n');
+    const hint = sfKey
+      ? '请检查 SILICONFLOW_API_KEY、额度与 SILICONFLOW_ASR_MODEL；若仅配置硅基流动，也可改配 Dify 语音转文字作为备用。'
+      : '请确认 Dify 实例已配置语音转文字模型，或改配 SILICONFLOW_API_KEY 使用硅基流动 ASR。';
+    return [`[音频转写失败（${originalName}）: ${e.message}]`, hint].join('\n');
   }
 
   // ── 第二步：原始文字 → 精炼整理（ke-audio-transcript-refine 工作流，可选）──
@@ -202,10 +271,21 @@ export async function transcribeAudio(filePath, originalName, sessionContext = {
 
 // ── 公共入口（对外导出，音频文件直接返回 AUDIO_PENDING 占位）────────────────
 export async function extractTextFromFile(filePath, originalName) {
-  const ext = (originalName.split('.').pop() || '').toLowerCase();
+  const hasDot = originalName.includes('.');
+  const ext = hasDot ? (originalName.split('.').pop() || '').toLowerCase() : '';
 
   // 音频文件：上传时不做耗时转写，返回占位标记，由 anchor/run 统一批量处理
   if (isAudioExt(ext)) return AUDIO_PENDING;
+
+  // 无扩展名：按 UTF-8 文本读取（如 README、noext）
+  if (!ext) {
+    try {
+      const s = fs.readFileSync(filePath, 'utf8');
+      return truncate(s);
+    } catch {
+      return '';
+    }
+  }
 
   // 纯文本类：直接读 UTF-8
   if (['txt', 'md', 'csv', 'json', 'html', 'htm', 'xml'].includes(ext)) {
@@ -235,7 +315,7 @@ export function mergeMaterialLines(session) {
   const lines = [];
   lines.push(`模式: ${session.mode}`);
   if (session.course_title) lines.push(`关联课程: ${session.course_title}`);
-  lines.push(`萃取目标: ${session.extract_goal || '（空）'}`);
+  lines.push(`萃取目标: ${String(session.extract_goal ?? '').trim() || '（空）'}`);
   lines.push(`目标受众: ${session.target_audience || '（未填）'}`);
   lines.push(`应用场景: ${(session.use_scenes || []).join(', ')}`);
 

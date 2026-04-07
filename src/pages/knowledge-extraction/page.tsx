@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import DashboardSidebar from '@/pages/dashboard/components/DashboardSidebar';
 import ExtractionHeader from './components/ExtractionHeader';
@@ -24,10 +24,18 @@ const KnowledgeExtractionPage = () => {
   const [notifOpen, setNotifOpen] = useState(false);
   /** 从列表进入时递增，驱动 ExtractionList 重新请求 GET /sessions */
   const [listRefresh, setListRefresh] = useState(0);
+  /** 仅用于 SourceAnchorStep 的 key，避免与 keSessionId 绑定导致会话就绪后整页 remount */
+  const newExtractionCounter = useRef(0);
+  const [anchorWorkflowKey, setAnchorWorkflowKey] = useState<string | number>(() => Date.now());
+  /** 仅从列表打开会话时传入 Step1，用于 GET 回填；新建萃取时不要传 keSessionId，否则会重复触发 effect、打断 keCreateSession */
+  const [anchorResumeFromListId, setAnchorResumeFromListId] = useState<string | null>(null);
 
   const handleNew = () => {
     setActiveStep(0);
     setViewMode('workflow');
+    newExtractionCounter.current += 1;
+    setAnchorWorkflowKey(`new-${newExtractionCounter.current}`);
+    setAnchorResumeFromListId(null);
     setKeSessionId(null);
     setKeAnchorSummary(null);
     setKeFilterItems(null);
@@ -46,6 +54,8 @@ const KnowledgeExtractionPage = () => {
     }
     try {
       const s = await keGetSession(id);
+      setAnchorWorkflowKey(id);
+      setAnchorResumeFromListId(id);
       setKeSessionId(s.id);
       const summary = s.anchor_package?.anchor_summary;
       setKeAnchorSummary(typeof summary === 'string' ? summary : null);
@@ -79,8 +89,18 @@ const KnowledgeExtractionPage = () => {
   const [keFilterItems, setKeFilterItems] = useState<KnowledgeItem[] | null>(null);
   const [keRefinementResult, setKeRefinementResult] = useState<RefinementResult | null>(null);
 
+  const handleKeSessionReady = useCallback((sid: string) => {
+    setKeSessionId(sid);
+  }, []);
+
   const handleNext = () => setActiveStep(prev => Math.min(prev + 1, 3));
   const handlePrev = () => setActiveStep(prev => Math.max(prev - 1, 0));
+
+  /** 未拿到会话 ID 时不允许跳到第 2 步及以后（避免分层筛选无 sessionId、不触发任何接口） */
+  const handleWorkflowStepChange = (step: number) => {
+    if (step >= 1 && !keSessionId) return;
+    setActiveStep(step);
+  };
 
   const handleAnchorStepNext = (payload?: { sessionId: string; anchorSummary?: string }) => {
     if (payload?.sessionId) setKeSessionId(payload.sessionId);
@@ -166,7 +186,7 @@ const KnowledgeExtractionPage = () => {
 
         {/* Workflow step header — only in workflow mode */}
         {viewMode === 'workflow' && (
-          <ExtractionHeader activeStep={activeStep} onStepChange={setActiveStep} />
+          <ExtractionHeader activeStep={activeStep} onStepChange={handleWorkflowStepChange} />
         )}
 
         {/* Page body */}
@@ -176,8 +196,9 @@ const KnowledgeExtractionPage = () => {
           )}
           {viewMode === 'workflow' && activeStep === 0 && (
             <SourceAnchorStep
-              key={keSessionId ?? 'new'}
-              resumeSessionId={keSessionId}
+              key={String(anchorWorkflowKey)}
+              resumeSessionId={anchorResumeFromListId}
+              onSessionReady={handleKeSessionReady}
               onNext={handleAnchorStepNext}
             />
           )}

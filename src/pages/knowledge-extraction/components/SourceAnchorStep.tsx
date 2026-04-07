@@ -11,6 +11,8 @@ import {
 
 interface SourceAnchorStepProps {
   onNext: (payload?: { sessionId: string; anchorSummary?: string }) => void;
+  /** 会话创建或加载成功后立刻回调，便于父组件同步 sessionId（避免仅点顶部步骤条时第二步无会话） */
+  onSessionReady?: (sessionId: string) => void;
   /** 从列表打开或从后续步骤回到 Step1 时传入，复用该会话并回填表单 */
   resumeSessionId?: string | null;
 }
@@ -66,6 +68,13 @@ const fileTypeConfig: Record<UploadedFile['type'], { icon: string; color: string
   other: { icon: 'ri-file-line', color: 'text-gray-500', bg: 'bg-gray-50', label: '其他文件' },
 };
 
+function newLocalRowId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
 const scenes = [
   { id: 'knowledge-base', label: '企业知识库' },
   { id: 'onboarding', label: '新人带教' },
@@ -104,7 +113,7 @@ const materialItems = [
   },
 ];
 
-const SourceAnchorStep = ({ onNext, resumeSessionId }: SourceAnchorStepProps) => {
+const SourceAnchorStep = ({ onNext, onSessionReady, resumeSessionId }: SourceAnchorStepProps) => {
   const useApi = isKeApiEnabled();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionInitError, setSessionInitError] = useState<string | null>(null);
@@ -142,6 +151,7 @@ const SourceAnchorStep = ({ onNext, resumeSessionId }: SourceAnchorStepProps) =>
           const s = await keGetSession(resumeSessionId);
           if (cancelled) return;
           setSessionId(s.id);
+          onSessionReady?.(s.id);
           setProjectName(typeof s.project_name === 'string' ? s.project_name : '');
           setExtractGoal(s.extract_goal ?? '');
           setTargetAudience(s.target_audience ?? '');
@@ -174,7 +184,10 @@ const SourceAnchorStep = ({ onNext, resumeSessionId }: SourceAnchorStepProps) =>
           use_scenes: ['knowledge-base'],
           material_selection: { outline: true, ppt: true, script: true },
         });
-        if (!cancelled) setSessionId(s.id);
+        if (!cancelled) {
+          setSessionId(s.id);
+          onSessionReady?.(s.id);
+        }
       } catch (e) {
         if (!cancelled) setSessionInitError(e instanceof Error ? e.message : String(e));
       }
@@ -182,7 +195,7 @@ const SourceAnchorStep = ({ onNext, resumeSessionId }: SourceAnchorStepProps) =>
     return () => {
       cancelled = true;
     };
-  }, [useApi, resumeSessionId]);
+  }, [useApi, resumeSessionId, onSessionReady]);
 
   useEffect(() => {
     if (!useApi || !sessionId) return;
@@ -223,44 +236,64 @@ const SourceAnchorStep = ({ onNext, resumeSessionId }: SourceAnchorStepProps) =>
     kind: 'manual_upload' | 'audio_supplement',
     setter: React.Dispatch<React.SetStateAction<LocalFileRow[]>>
   ) => {
-    for (const file of files) {
-      const id = Math.random().toString(36).slice(2);
-      const row: LocalFileRow = {
-        id,
-        name: file.name,
-        size: formatSize(file.size),
-        type: getFileType(file.name),
-        uploading: useApi,
-      };
-      setter(prev => [...prev, row]);
-      if (useApi && sessionId) {
-        try {
-          const result = await uploadToSession(file, kind);
-          if (!result) throw new Error('上传响应为空');
-          const isAudioPending = Boolean(result.audio_pending);
-          setter(prev =>
-            prev.map(r => (r.id === id
-              ? { ...r, serverAssetId: result.id, uploading: false, audioPending: isAudioPending, error: undefined }
-              : r
-            ))
-          );
-        } catch (err) {
-          setter(prev =>
-            prev.map(r =>
-              r.id === id
-                ? { ...r, uploading: false, error: err instanceof Error ? err.message : String(err) }
-                : r
-            )
-          );
-        }
-      } else if (useApi && !sessionId) {
-        setter(prev =>
-          prev.map(r =>
-            r.id === id ? { ...r, uploading: false, error: '会话未就绪，请稍后重试' } : r
-          )
+    if (files.length === 0) return;
+
+    const rows: LocalFileRow[] = files.map((file) => ({
+      id: newLocalRowId(),
+      name: file.name,
+      size: formatSize(file.size),
+      type: getFileType(file.name),
+      uploading: useApi,
+    }));
+
+    // 一次批量插入，避免多文件时连续 setState 与列表 key 抖动（降低 React reconcile 异常概率）
+    setter((prev) => [...prev, ...rows]);
+
+    if (!useApi) {
+      setter((prev) =>
+        prev.map((r) => (rows.some((x) => x.id === r.id) ? { ...r, uploading: false } : r)),
+      );
+      return;
+    }
+    if (!sessionId) {
+      setter((prev) =>
+        prev.map((r) =>
+          rows.some((x) => x.id === r.id)
+            ? { ...r, uploading: false, error: '会话未就绪，请稍后重试' }
+            : r,
+        ),
+      );
+      return;
+    }
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const id = rows[i].id;
+      try {
+        const result = await uploadToSession(file, kind);
+        if (!result) throw new Error('上传响应为空');
+        const isAudioPending = Boolean(result.audio_pending);
+        setter((prev) =>
+          prev.map((r) =>
+            r.id === id
+              ? {
+                  ...r,
+                  serverAssetId: result.id,
+                  uploading: false,
+                  audioPending: isAudioPending,
+                  error: undefined,
+                }
+              : r,
+          ),
         );
-      } else {
-        setter(prev => prev.map(r => (r.id === id ? { ...r, uploading: false } : r)));
+      } catch (err) {
+        setter((prev) =>
+          prev.map((r) =>
+            r.id === id
+              ? { ...r, uploading: false, error: err instanceof Error ? err.message : String(err) }
+              : r,
+          ),
+        );
       }
     }
   };
@@ -601,7 +634,7 @@ const SourceAnchorStep = ({ onNext, resumeSessionId }: SourceAnchorStepProps) =>
                   />
                   </div>
                   {courseAudioFiles.length > 0 && (
-                    <div className="space-y-1.5 mt-2.5">
+                    <div className="space-y-1.5 mt-2.5" translate="no">
                       {courseAudioFiles.map(f => (
                         <div key={f.id} className="flex items-center gap-2 bg-white rounded-lg px-2.5 py-1.5 border border-blue-100">
                           <i className="ri-mic-line text-indigo-400 text-xs" />
@@ -774,9 +807,9 @@ const SourceAnchorStep = ({ onNext, resumeSessionId }: SourceAnchorStepProps) =>
                 </div>
 
                 {manualFiles.length > 0 && (
-                  <div className="space-y-1.5 max-h-[280px] overflow-y-auto">
+                  <div className="space-y-1.5 max-h-[280px] overflow-y-auto" translate="no">
                     {manualFiles.map(f => {
-                      const cfg = fileTypeConfig[f.type];
+                      const cfg = fileTypeConfig[f.type] ?? fileTypeConfig.other;
                       return (
                         <div key={f.id} className={`flex items-center gap-2.5 p-2.5 rounded-xl border ${f.audioPending ? 'border-indigo-100 bg-indigo-50/60' : `border-gray-100 ${cfg.bg}`}`}>
                           <div className="w-7 h-7 flex items-center justify-center bg-white rounded-lg flex-shrink-0">

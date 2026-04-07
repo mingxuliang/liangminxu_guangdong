@@ -31,7 +31,11 @@ const LayeredFilterStep = ({ sessionId, onNext, onPrev }: LayeredFilterStepProps
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      setLoading(false);
+      setError(null);
+      return;
+    }
     const ac = new AbortController();
     const { signal } = ac;
 
@@ -110,6 +114,26 @@ const LayeredFilterStep = ({ sessionId, onNext, onPrev }: LayeredFilterStepProps
   const explicitCount  = items.filter(i => i.type === 'explicit' && i.selected).length;
   const tacitCount     = items.filter(i => i.type === 'tacit'    && i.selected).length;
   const practiceCount  = items.filter(i => i.type === 'practice' && i.selected).length;
+
+  if (!sessionId) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-3 px-4">
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-6 py-4 text-sm text-amber-900 max-w-lg text-center">
+          <p className="font-bold mb-1">暂无萃取会话</p>
+          <p className="text-xs leading-relaxed">
+            请返回「源头锚定」填写信息并点击「开始分层筛选」；勿仅通过顶部步骤条跳转，否则无法关联会话与音频转写。
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onPrev}
+          className="px-4 py-2 text-xs text-white bg-blue-500 rounded-xl hover:bg-blue-600 transition-colors cursor-pointer"
+        >
+          返回源头锚定
+        </button>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

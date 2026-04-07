@@ -12,8 +12,11 @@ describe('extractText.mjs - Text Extraction', () => {
   beforeEach(async () => {
     vi.resetModules();
     // Set default env for audio transcription tests
+    process.env.SILICONFLOW_API_KEY = '';
+    process.env.KE_SILICONFLOW_ASR_API_KEY = '';
     process.env.KE_AUDIO_TO_TEXT_API_KEY = '';
     process.env.KE_ANCHOR_API_KEY = '';
+    process.env.KE_AUDIO_REFINE_API_KEY = '';
     process.env.DIFY_BASE_URL = 'http://127.0.0.1:8088/v1';
   });
 
@@ -321,6 +324,65 @@ describe('extractText.mjs - Text Extraction', () => {
       const result = extractText.mergeMaterialLines(session);
       
       expect(result).toContain('勾选资料: 大纲=否, PPT=否, 讲稿=否');
+    });
+  });
+
+  describe('transcribeAudio', () => {
+    it('calls SiliconFlow when SILICONFLOW_API_KEY is set', async () => {
+      process.env.SILICONFLOW_API_KEY = 'sk-test';
+      const fp = path.join(__dirname, '../tmp-asr-sf.mp3');
+      fs.writeFileSync(fp, Buffer.from([0xff, 0xf3]));
+      testFiles.push(fp);
+
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ text: '硅基流动转写结果' }),
+      });
+      const prevFetch = globalThis.fetch;
+      globalThis.fetch = fetchMock;
+      try {
+        const { transcribeAudio } = await import('./extractText.mjs');
+        const out = await transcribeAudio(fp, 'a.mp3', {});
+
+        expect(out).toContain('硅基流动转写结果');
+        expect(fetchMock).toHaveBeenCalledWith(
+          'https://api.siliconflow.cn/v1/audio/transcriptions',
+          expect.objectContaining({ method: 'POST' })
+        );
+      } finally {
+        globalThis.fetch = prevFetch;
+      }
+    });
+
+    it('falls back to Dify when SiliconFlow fails and Dify key exists', async () => {
+      process.env.SILICONFLOW_API_KEY = 'sk-test';
+      process.env.KE_AUDIO_TO_TEXT_API_KEY = 'app-dify';
+      const fp = path.join(__dirname, '../tmp-asr-fb.mp3');
+      fs.writeFileSync(fp, Buffer.from([0xff, 0xf3]));
+      testFiles.push(fp);
+
+      let call = 0;
+      const fetchMock = vi.fn().mockImplementation(() => {
+        call += 1;
+        if (call === 1) {
+          return Promise.resolve({ ok: false, status: 500, text: async () => 'err' });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ text: 'Dify 转写' }),
+        });
+      });
+      const prevFetch = globalThis.fetch;
+      globalThis.fetch = fetchMock;
+      try {
+        const { transcribeAudio } = await import('./extractText.mjs');
+        const out = await transcribeAudio(fp, 'a.mp3', {});
+
+        expect(out).toContain('Dify 转写');
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+      } finally {
+        globalThis.fetch = prevFetch;
+      }
     });
   });
 

@@ -26,6 +26,42 @@ const UPLOAD_ROOT = path.join(__dirname, 'uploads');
 
 const PORT = Number(process.env.PORT || process.env.SERVER_PORT || 8787);
 
+/**
+ * 上传时音频为 AUDIO_PENDING，在 anchor/run 或 filter/run 前统一转写（硅基/Dify）。
+ * 解决：已有 anchor_package 后又上传新音频时，若未再次点源头锚定，第二步仍应带上转写结果。
+ */
+async function transcribePendingAudioAssets(s) {
+  let changed = false;
+  for (const asset of s.assets || []) {
+    if (asset.extracted_text !== AUDIO_PENDING) continue;
+    if (!asset.path) {
+      asset.extracted_text = `[音频文件已上传至云存储，本地副本不可用，无法自动转写: ${asset.original_name}]`;
+      asset.audio_pending = false;
+      changed = true;
+      continue;
+    }
+    const absPath = path.join(ROOT, asset.path);
+    if (!fs.existsSync(absPath)) {
+      asset.extracted_text = `[音频本地文件已被移除，无法转写: ${asset.original_name}]`;
+      asset.audio_pending = false;
+      changed = true;
+      continue;
+    }
+    const tag = '[pending-audio]';
+    console.log(`${tag} 开始转写: ${asset.original_name} (session=${s.id})`);
+    asset.extracted_text = await transcribeAudio(absPath, asset.original_name, {
+      extract_goal: s.extract_goal || '',
+      course_title: s.course_title || '',
+      target_audience: s.target_audience || '',
+    });
+    asset.audio_pending = false;
+    changed = true;
+    console.log(`${tag} 转写完成: ${asset.original_name} (${String(asset.extracted_text).length} 字)`);
+  }
+  if (changed) saveSession(s);
+  return changed;
+}
+
 function ensureUploadDir(sessionId) {
   const dir = path.join(UPLOAD_ROOT, sessionId);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -36,13 +72,22 @@ const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: '2mb' }));
 
-/** 与 extractText.transcribeAudio 一致：优先 KE_AUDIO_TO_TEXT_API_KEY，否则 KE_ANCHOR_API_KEY */
+/** 与 extractText.transcribeAudio 一致：硅基流动优先；否则 KE_AUDIO_TO_TEXT_API_KEY / KE_ANCHOR_API_KEY */
 function asrApiKeyInfo() {
+  const sf =
+    process.env.SILICONFLOW_API_KEY?.trim() || process.env.KE_SILICONFLOW_ASR_API_KEY?.trim();
+  if (sf) {
+    return {
+      configured: true,
+      provider: 'siliconflow',
+      source: process.env.SILICONFLOW_API_KEY?.trim() ? 'SILICONFLOW_API_KEY' : 'KE_SILICONFLOW_ASR_API_KEY',
+    };
+  }
   const direct = process.env.KE_AUDIO_TO_TEXT_API_KEY?.trim();
   const fallback = process.env.KE_ANCHOR_API_KEY?.trim();
-  if (direct) return { configured: true, source: 'KE_AUDIO_TO_TEXT_API_KEY' };
-  if (fallback) return { configured: true, source: 'KE_ANCHOR_API_KEY' };
-  return { configured: false, source: 'none' };
+  if (direct) return { configured: true, provider: 'dify', source: 'KE_AUDIO_TO_TEXT_API_KEY' };
+  if (fallback) return { configured: true, provider: 'dify', source: 'KE_ANCHOR_API_KEY' };
+  return { configured: false, provider: 'none', source: 'none' };
 }
 
 app.get('/api/health', (_req, res) => {
@@ -55,8 +100,9 @@ app.get('/api/health', (_req, res) => {
     /** 未配置时 Step1 会返回模拟 anchor_package，PDF 解析内容不会发往 Dify */
     ke_anchor_configured: Boolean(process.env.KE_ANCHOR_API_KEY?.trim()),
     dify_base_url: (process.env.DIFY_BASE_URL || '').trim() || '(default http://127.0.0.1:8088/v1)',
-    /** Dify /v1/audio-to-text：未配置时 anchor/run 中音频只会写入占位说明 */
+    /** ASR：硅基流动或 Dify；未配置时 anchor/run 中音频只会写入占位说明 */
     asr_configured: asr.configured,
+    asr_provider: asr.provider,
     asr_key_source: asr.source,
     audio_refine_configured: Boolean(process.env.KE_AUDIO_REFINE_API_KEY?.trim()),
   });
@@ -200,36 +246,7 @@ app.post('/api/knowledge-extraction/sessions/:id/anchor/run', async (req, res) =
   saveSession(s);
 
   try {
-    // ── 批量转写待处理音频文件（上传时跳过，在此统一处理）────────────────────
-    let audioTranscribed = false;
-    for (const asset of (s.assets || [])) {
-      if (asset.extracted_text !== AUDIO_PENDING) continue;
-      if (!asset.path) {
-        // 音频文件没有本地路径（OSS 情况）
-        asset.extracted_text = `[音频文件已上传至云存储，本地副本不可用，无法自动转写: ${asset.original_name}]`;
-        asset.audio_pending = false;
-        audioTranscribed = true;
-        continue;
-      }
-      const absPath = path.join(ROOT, asset.path);
-      if (!fs.existsSync(absPath)) {
-        asset.extracted_text = `[音频本地文件已被移除，无法转写: ${asset.original_name}]`;
-        asset.audio_pending = false;
-        audioTranscribed = true;
-        continue;
-      }
-      console.log(`[anchor/run] 开始转写音频: ${asset.original_name}`);
-      // 传入 session 上下文，让精炼工作流能利用萃取目标和课程信息
-      asset.extracted_text = await transcribeAudio(absPath, asset.original_name, {
-        extract_goal: s.extract_goal || '',
-        course_title: s.course_title || '',
-        target_audience: s.target_audience || '',
-      });
-      asset.audio_pending = false;
-      audioTranscribed = true;
-      console.log(`[anchor/run] 转写完成: ${asset.original_name} (${asset.extracted_text.length} 字)`);
-    }
-    if (audioTranscribed) saveSession(s); // 保存转写结果
+    await transcribePendingAudioAssets(s);
 
     const material_bundle_text = mergeMaterialLines(s);
     const bundleSlice = material_bundle_text.slice(0, 100_000);
@@ -273,6 +290,9 @@ app.post('/api/knowledge-extraction/sessions/:id/anchor/run', async (req, res) =
 app.post('/api/knowledge-extraction/sessions/:id/filter/run', async (req, res) => {
   const s = loadSession(req.params.id);
   if (!s) return res.status(404).json({ error: 'not_found' });
+
+  // 与 anchor/run 一致：先转写待处理音频，再合并 material_bundle（避免仅第二步触发时音频仍是占位）
+  await transcribePendingAudioAssets(s);
 
   if (!s.anchor_package) {
     return res.status(400).json({ error: 'anchor_required: 请先完成源头锚定（Step 1）' });
