@@ -53,20 +53,69 @@ function extractFirstJsonArray(s) {
   return null;
 }
 
+/** Dify 部分版本 outputs 为 [{ variable, value }]，统一成对象 */
+function normalizeWorkflowOutputs(outputs) {
+  if (outputs == null) return {};
+  if (!Array.isArray(outputs)) return outputs;
+  const merged = {};
+  for (const entry of outputs) {
+    if (entry && typeof entry === 'object') {
+      const k = entry.variable ?? entry.key ?? entry.name;
+      const v = entry.value ?? entry.text ?? entry.content;
+      if (k !== undefined && v !== undefined) merged[k] = v;
+    }
+  }
+  return merged;
+}
+
+function parseJsonLenient(chunk) {
+  const c = chunk.trim();
+  try {
+    return JSON.parse(c);
+  } catch {
+    try {
+      return JSON.parse(c.replace(/,\s*([\]}])/g, '$1'));
+    } catch {
+      throw new Error('JSON parse failed');
+    }
+  }
+}
+
 /** 将 Dify 工作流 outputs.knowledge_items（字符串或已解析值）转为 knowledge_items 数组 */
 function parseFilterKnowledgeItems(rawOut) {
   if (Array.isArray(rawOut)) return rawOut;
 
-  const text =
+  let text =
     typeof rawOut === 'string'
       ? rawOut
       : rawOut != null
         ? JSON.stringify(rawOut)
         : '[]';
+  text = text.trim().replace(/^\uFEFF/, '');
+
+  // Dify 偶发「字符串里再包一层 JSON 字符串」
+  if (typeof rawOut === 'string') {
+    let s = text;
+    for (let d = 0; d < 5; d++) {
+      try {
+        const p = parseJsonLenient(s);
+        if (Array.isArray(p)) return p;
+        if (p && typeof p === 'object' && Array.isArray(p.knowledge_items)) return p.knowledge_items;
+        if (typeof p === 'string') {
+          s = p;
+          continue;
+        }
+        break;
+      } catch {
+        break;
+      }
+    }
+    text = s;
+  }
 
   const tryParseArray = (chunk) => {
     const cleaned = stripJsonFence(chunk.trim());
-    const parsed = JSON.parse(cleaned);
+    const parsed = parseJsonLenient(cleaned);
     if (Array.isArray(parsed)) return parsed;
     if (parsed && Array.isArray(parsed.knowledge_items)) return parsed.knowledge_items;
     if (parsed && Array.isArray(parsed.items)) return parsed.items;
@@ -92,7 +141,7 @@ function parseFilterKnowledgeItems(rawOut) {
       /* continue */
     }
     try {
-      const parsed = JSON.parse(balanced);
+      const parsed = parseJsonLenient(balanced);
       if (Array.isArray(parsed)) return parsed;
     } catch {
       /* continue */
@@ -106,7 +155,7 @@ function parseFilterKnowledgeItems(rawOut) {
     const tryObj = sub.match(/^\{[\s\S]*\}/);
     if (tryObj) {
       try {
-        const o = JSON.parse(tryObj[0]);
+        const o = parseJsonLenient(tryObj[0]);
         if (Array.isArray(o.knowledge_items)) return o.knowledge_items;
         if (Array.isArray(o.items)) return o.items;
       } catch {
@@ -119,7 +168,7 @@ function parseFilterKnowledgeItems(rawOut) {
   try {
     const match = text.match(/\[[\s\S]*\]/);
     if (match) {
-      const parsed = JSON.parse(match[0]);
+      const parsed = parseJsonLenient(match[0]);
       if (Array.isArray(parsed)) return parsed;
     }
   } catch {
@@ -247,10 +296,9 @@ export async function runKeFilterWorkflow(inputs) {
     throw new Error(data?.error || json.message || '分层筛选工作流执行失败');
   }
 
+  const outputs = normalizeWorkflowOutputs(data?.outputs);
   const rawOut =
-    data?.outputs?.knowledge_items ??
-    data?.outputs?.text ??
-    data?.outputs?.result;
+    outputs?.knowledge_items ?? outputs?.text ?? outputs?.result;
 
   let knowledge_items = parseFilterKnowledgeItems(rawOut);
 

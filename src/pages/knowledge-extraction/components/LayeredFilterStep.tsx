@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { keRunFilter, type KnowledgeItem } from '@/services/knowledgeExtractionApi';
+import { recoverFilterItemsFromKRaw } from '../utils/recoverFilterItems';
 
 interface LayeredFilterStepProps {
   sessionId: string | null;
@@ -34,7 +35,7 @@ const LayeredFilterStep = ({ sessionId, onNext, onPrev }: LayeredFilterStepProps
     setError(null);
     keRunFilter(sessionId)
       .then(s => {
-        const raw = s.filter_items ?? [];
+        const raw = recoverFilterItemsFromKRaw(s.filter_items ?? []);
         setItems(raw);
         setIsMock(Boolean((s as { filter_error?: string }).filter_error?.startsWith('mock:')));
       })
@@ -99,7 +100,7 @@ const LayeredFilterStep = ({ sessionId, onNext, onPrev }: LayeredFilterStepProps
               setError(null);
               setLoading(true);
               keRunFilter(sessionId)
-                .then(s => { setItems(s.filter_items ?? []); })
+                .then(s => { setItems(recoverFilterItemsFromKRaw(s.filter_items ?? [])); })
                 .catch(e => setError(e instanceof Error ? e.message : String(e)))
                 .finally(() => setLoading(false));
             }}
