@@ -11,9 +11,122 @@ function getV1Root() {
 function stripJsonFence(s) {
   const t = s.trim();
   if (t.startsWith('```')) {
-    return t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    return t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
   }
   return t;
+}
+
+/**
+ * 从文本中截取第一个平衡的 JSON 数组片段（避免贪婪正则匹配到错误 ]）
+ */
+function extractFirstJsonArray(s) {
+  if (!s || typeof s !== 'string') return null;
+  const start = s.indexOf('[');
+  if (start === -1) return null;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (c === '\\') {
+        esc = true;
+        continue;
+      }
+      if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') {
+      inStr = true;
+      continue;
+    }
+    if (c === '[') depth++;
+    else if (c === ']') {
+      depth--;
+      if (depth === 0) return s.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+/** 将 Dify 工作流 outputs.knowledge_items（字符串或已解析值）转为 knowledge_items 数组 */
+function parseFilterKnowledgeItems(rawOut) {
+  if (Array.isArray(rawOut)) return rawOut;
+
+  const text =
+    typeof rawOut === 'string'
+      ? rawOut
+      : rawOut != null
+        ? JSON.stringify(rawOut)
+        : '[]';
+
+  const tryParseArray = (chunk) => {
+    const cleaned = stripJsonFence(chunk.trim());
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && Array.isArray(parsed.knowledge_items)) return parsed.knowledge_items;
+    if (parsed && Array.isArray(parsed.items)) return parsed.items;
+    if (parsed && typeof parsed === 'object' && (parsed.id || parsed.title)) return [parsed];
+    return null;
+  };
+
+  // 1) 整段直接解析（含围栏）
+  try {
+    const a = tryParseArray(text);
+    if (a) return a;
+  } catch {
+    /* continue */
+  }
+
+  // 2) 平衡括号截取数组再解析
+  const balanced = extractFirstJsonArray(text);
+  if (balanced) {
+    try {
+      const a = tryParseArray(balanced);
+      if (a) return a;
+    } catch {
+      /* continue */
+    }
+    try {
+      const parsed = JSON.parse(balanced);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      /* continue */
+    }
+  }
+
+  // 3) 尝试截取第一个 JSON 对象（LLM 有时输出 { "knowledge_items": [...] }）
+  const objStart = text.indexOf('{');
+  if (objStart !== -1) {
+    const sub = text.slice(objStart);
+    const tryObj = sub.match(/^\{[\s\S]*\}/);
+    if (tryObj) {
+      try {
+        const o = JSON.parse(tryObj[0]);
+        if (Array.isArray(o.knowledge_items)) return o.knowledge_items;
+        if (Array.isArray(o.items)) return o.items;
+      } catch {
+        /* continue */
+      }
+    }
+  }
+
+  // 4) 旧版贪婪正则兜底（仅当平衡括号失败）
+  try {
+    const match = text.match(/\[[\s\S]*\]/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return null;
 }
 
 export async function runKeAnchorWorkflow(inputs) {
@@ -134,25 +247,20 @@ export async function runKeFilterWorkflow(inputs) {
     throw new Error(data?.error || json.message || '分层筛选工作流执行失败');
   }
 
-  const rawOut = data?.outputs?.knowledge_items;
-  const text = typeof rawOut === 'string' ? rawOut : JSON.stringify(rawOut ?? []);
+  const rawOut =
+    data?.outputs?.knowledge_items ??
+    data?.outputs?.text ??
+    data?.outputs?.result;
 
-  let knowledge_items;
-  try {
-    // 1. 先尝试去掉 markdown 围栏后直接解析
-    const cleaned = stripJsonFence(text);
-    const parsed = JSON.parse(cleaned);
-    knowledge_items = Array.isArray(parsed) ? parsed : (parsed?.items ?? [parsed]);
-  } catch {
-    try {
-      // 2. 用正则从文本中提取第一个 JSON 数组片段
-      const match = text.match(/\[[\s\S]*\]/);
-      if (!match) throw new Error('未找到 JSON 数组');
-      const parsed = JSON.parse(match[0]);
-      knowledge_items = Array.isArray(parsed) ? parsed : [];
-    } catch {
-      // 3. 兜底：把原始文本作为提示条目返回，让用户知道出了什么问题
-      knowledge_items = [{
+  let knowledge_items = parseFilterKnowledgeItems(rawOut);
+
+  if (!knowledge_items?.length) {
+    const text =
+      typeof rawOut === 'string'
+        ? rawOut
+        : JSON.stringify(rawOut ?? {}).slice(0, 4000);
+    knowledge_items = [
+      {
         id: 'k_raw',
         type: 'explicit',
         category: '解析提示',
@@ -162,8 +270,8 @@ export async function runKeFilterWorkflow(inputs) {
         priority: 'low',
         reusable: false,
         selected: false,
-      }];
-    }
+      },
+    ];
   }
 
   // 确保每个条目都有必要字段
