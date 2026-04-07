@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
-import { keRunFilter, type KnowledgeItem } from '@/services/knowledgeExtractionApi';
+import { keGetSession, keRunFilter, type KnowledgeItem } from '@/services/knowledgeExtractionApi';
 import { recoverFilterItemsFromKRaw } from '../utils/recoverFilterItems';
+import { pollFilterUntilSettled } from '../utils/longRunningSession';
 
 interface LayeredFilterStepProps {
   sessionId: string | null;
@@ -31,16 +32,60 @@ const LayeredFilterStep = ({ sessionId, onNext, onPrev }: LayeredFilterStepProps
 
   useEffect(() => {
     if (!sessionId) return;
-    setLoading(true);
-    setError(null);
-    keRunFilter(sessionId)
-      .then(s => {
-        const raw = recoverFilterItemsFromKRaw(s.filter_items ?? []);
-        setItems(raw);
-        setIsMock(Boolean((s as { filter_error?: string }).filter_error?.startsWith('mock:')));
-      })
-      .catch(e => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
+    const ac = new AbortController();
+    const { signal } = ac;
+
+    const applySession = (s: { filter_items?: KnowledgeItem[]; filter_error?: string | null }) => {
+      const raw = recoverFilterItemsFromKRaw(s.filter_items ?? []);
+      setItems(raw);
+      setIsMock(Boolean(s.filter_error?.startsWith('mock:')));
+    };
+
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        let s = await keGetSession(sessionId);
+        if (signal.aborted) return;
+        if (s.filter_status === 'ready' && Array.isArray(s.filter_items)) {
+          applySession(s);
+          return;
+        }
+        if (s.filter_status === 'failed') {
+          setError(s.filter_error || '分层筛选失败');
+          return;
+        }
+        if (s.filter_status === 'running') {
+          s = await pollFilterUntilSettled(sessionId, { signal });
+          if (signal.aborted) return;
+          if (s.filter_status === 'ready' && Array.isArray(s.filter_items)) {
+            applySession(s);
+            return;
+          }
+          if (s.filter_status === 'failed') {
+            setError(s.filter_error || '分层筛选失败');
+            return;
+          }
+          if (s.filter_status === 'running') {
+            setError(
+              '分层筛选仍在服务端处理中，请稍后点击「重新分析」或刷新页面；若 Dify 较慢属正常现象。',
+            );
+            return;
+          }
+        }
+        s = await keRunFilter(sessionId);
+        if (signal.aborted) return;
+        applySession(s);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg === 'Aborted') return;
+        setError(msg);
+      } finally {
+        if (!signal.aborted) setLoading(false);
+      }
+    })();
+
+    return () => ac.abort();
   }, [sessionId]);
 
   const toggleExpand = useCallback((id: string, e: React.MouseEvent) => {
@@ -72,7 +117,7 @@ const LayeredFilterStep = ({ sessionId, onNext, onPrev }: LayeredFilterStepProps
         <div className="text-center space-y-3">
           <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto" />
           <p className="text-sm text-gray-500">正在调用 AI 进行知识分层筛选…</p>
-          <p className="text-xs text-gray-400">首次分析可能需要 30-60 秒</p>
+          <p className="text-xs text-gray-400">首次分析可能需要 1–3 分钟；请勿关闭页面</p>
         </div>
       </div>
     );

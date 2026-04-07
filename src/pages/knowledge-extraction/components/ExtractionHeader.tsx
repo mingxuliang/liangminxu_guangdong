@@ -13,31 +13,13 @@ const steps = [
 const ExtractionHeader = ({ activeStep, onStepChange }: ExtractionHeaderProps) => {
   return (
     <div className="bg-white border-b border-gray-100 px-6 py-4">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 flex items-center justify-center bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl shadow-md shadow-blue-200">
-            <i className="ri-filter-3-line text-white text-base" />
-          </div>
-          <div>
-            <h1 className="text-base font-bold text-gray-900">知识萃取工作台</h1>
-            <p className="text-xs text-gray-400 mt-0.5">将课程知识转化为可复用的标准化资产</p>
-          </div>
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-9 h-9 flex items-center justify-center bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl shadow-md shadow-blue-200">
+          <i className="ri-filter-3-line text-white text-base" />
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-500 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors cursor-pointer whitespace-nowrap"
-          >
-            <i className="ri-history-line text-sm" />
-            历史记录
-          </button>
-          <button
-            type="button"
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors cursor-pointer whitespace-nowrap"
-          >
-            <i className="ri-add-line text-sm" />
-            新建萃取
-          </button>
+        <div>
+          <h1 className="text-base font-bold text-gray-900">知识萃取工作台</h1>
+          <p className="text-xs text-gray-400 mt-0.5">将课程知识转化为可复用的标准化资产</p>
         </div>
       </div>
 

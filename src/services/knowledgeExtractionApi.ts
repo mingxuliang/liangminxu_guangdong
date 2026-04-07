@@ -7,6 +7,8 @@ export type KeSession = {
   course_title: string | null;
   material_selection: { outline: boolean; ppt: boolean; script: boolean };
   extract_goal: string;
+  /** 项目名称：列表卡片主标题，与萃取目标独立 */
+  project_name?: string;
   target_audience: string;
   use_scenes: string[];
   status: string;

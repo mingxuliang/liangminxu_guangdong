@@ -1,13 +1,18 @@
 // 按优先级加载环境变量：.env → .env.local（.env.local 会覆盖 .env）
+// 必须相对本文件解析项目根目录：若从子目录启动 node（cwd 非仓库根），仅依赖 process.cwd() 会读不到 .env.local，导致 KE_* 未注入、全程走模拟数据
 import { config as dotenvConfig } from 'dotenv';
-dotenvConfig();                              // 先加载 .env
-dotenvConfig({ path: '.env.local', override: true }); // .env.local 优先级更高
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const _serverDir = path.dirname(fileURLToPath(import.meta.url));
+const _projectRoot = path.join(_serverDir, '..');
+dotenvConfig({ path: path.join(_projectRoot, '.env') });
+dotenvConfig({ path: path.join(_projectRoot, '.env.local'), override: true });
+
 import cors from 'cors';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import multer from 'multer';
 
 import { runKeAnchorWorkflow, runKeFilterWorkflow, runKeRefineWorkflow, runKeReextractWorkflow, runKeValidationWorkflow } from './lib/difyClient.mjs';
@@ -15,8 +20,8 @@ import { extractTextFromFile, mergeMaterialLines, AUDIO_PENDING, isAudioExt, tra
 import { isOssConfigured, putLocalFileToOss } from './lib/ossUpload.mjs';
 import { createSessionRecord, listSessions, loadSession, saveSession } from './lib/store.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.join(__dirname, '..');
+const __dirname = _serverDir;
+const ROOT = _projectRoot;
 const UPLOAD_ROOT = path.join(__dirname, 'uploads');
 
 const PORT = Number(process.env.PORT || process.env.SERVER_PORT || 8787);
@@ -31,12 +36,29 @@ const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: '2mb' }));
 
+/** 与 extractText.transcribeAudio 一致：优先 KE_AUDIO_TO_TEXT_API_KEY，否则 KE_ANCHOR_API_KEY */
+function asrApiKeyInfo() {
+  const direct = process.env.KE_AUDIO_TO_TEXT_API_KEY?.trim();
+  const fallback = process.env.KE_ANCHOR_API_KEY?.trim();
+  if (direct) return { configured: true, source: 'KE_AUDIO_TO_TEXT_API_KEY' };
+  if (fallback) return { configured: true, source: 'KE_ANCHOR_API_KEY' };
+  return { configured: false, source: 'none' };
+}
+
 app.get('/api/health', (_req, res) => {
+  const asr = asrApiKeyInfo();
   res.json({
     ok: true,
     service: 'knowledge-extraction-api',
     time: new Date().toISOString(),
     object_storage: isOssConfigured() ? 'configured' : 'local_only',
+    /** 未配置时 Step1 会返回模拟 anchor_package，PDF 解析内容不会发往 Dify */
+    ke_anchor_configured: Boolean(process.env.KE_ANCHOR_API_KEY?.trim()),
+    dify_base_url: (process.env.DIFY_BASE_URL || '').trim() || '(default http://127.0.0.1:8088/v1)',
+    /** Dify /v1/audio-to-text：未配置时 anchor/run 中音频只会写入占位说明 */
+    asr_configured: asr.configured,
+    asr_key_source: asr.source,
+    audio_refine_configured: Boolean(process.env.KE_AUDIO_REFINE_API_KEY?.trim()),
   });
 });
 
@@ -72,6 +94,7 @@ app.patch('/api/knowledge-extraction/sessions/:id', (req, res) => {
   if (b.course_title !== undefined) s.course_title = b.course_title;
   if (b.material_selection) s.material_selection = { ...s.material_selection, ...b.material_selection };
   if (b.extract_goal !== undefined) s.extract_goal = b.extract_goal;
+  if (b.project_name !== undefined) s.project_name = String(b.project_name);
   if (b.target_audience !== undefined) s.target_audience = b.target_audience;
   if (b.use_scenes) s.use_scenes = b.use_scenes;
   if (b.extraction_completed !== undefined) s.extraction_completed = Boolean(b.extraction_completed);
@@ -209,14 +232,19 @@ app.post('/api/knowledge-extraction/sessions/:id/anchor/run', async (req, res) =
     if (audioTranscribed) saveSession(s); // 保存转写结果
 
     const material_bundle_text = mergeMaterialLines(s);
+    const bundleSlice = material_bundle_text.slice(0, 100_000);
     const inputs = {
       mode: s.mode,
       extract_goal: s.extract_goal,
       target_audience: s.target_audience || '',
       use_scenes: JSON.stringify(s.use_scenes || []),
       course_title: s.course_title || '',
-      material_bundle_text: material_bundle_text.slice(0, 100_000),
+      material_bundle_text: bundleSlice,
     };
+
+    console.log(
+      `[anchor/run] session=${s.id} assets=${s.assets?.length ?? 0} material_bundle_chars=${bundleSlice.length}`,
+    );
 
     const result = await runKeAnchorWorkflow(inputs);
     s.anchor_package = result.anchor_package;
@@ -224,6 +252,13 @@ app.post('/api/knowledge-extraction/sessions/:id/anchor/run', async (req, res) =
     s.error_message = result.mock
       ? 'mock: 未配置 KE_ANCHOR_API_KEY，返回模拟锚定包'
       : null;
+    if (result.mock) {
+      console.warn(
+        '[anchor/run] 模拟锚定：KE_ANCHOR_API_KEY 未生效。请确认 .env / .env.local 位于项目根且已重启 node；GET /api/health 中 ke_anchor_configured 应为 true。',
+      );
+    } else {
+      console.log('[anchor/run] 已调用 Dify 源头锚定工作流（非模拟）');
+    }
     saveSession(s);
     res.json(s);
   } catch (e) {

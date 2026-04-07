@@ -96,6 +96,9 @@ export default defineConfig(({ mode }) => {
       "/api": {
         target: apiProxyTarget,
         changeOrigin: true,
+        /** 知识萃取 Step2/3 会长时间阻塞至 Dify 返回，避免开发代理过早断开导致前端报错、后端其实已成功 */
+        timeout: 600_000,
+        proxyTimeout: 600_000,
       },
       /** 本地开发绕过跨域；请求 /dify-api/v1/... 转发到 DIFY_PROXY_TARGET（如自建 http://81.70.78.132:8088） */
       "/dify-api": {

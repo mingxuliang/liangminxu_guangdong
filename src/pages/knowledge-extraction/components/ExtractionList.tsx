@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { mockExtractions, extractionFilterOptions } from '@/mocks/knowledgeExtraction';
 import { isKeApiEnabled, keListSessions } from '@/services/knowledgeExtractionApi';
 import ExtractionCard from './ExtractionCard';
@@ -11,10 +11,13 @@ interface ExtractionListProps {
   refreshKey?: number;
 }
 
+const PAGE_SIZE = 8;
+
 const ExtractionList = ({ onNew, onOpen, refreshKey = 0 }: ExtractionListProps) => {
   const useApi = isKeApiEnabled();
   const [activeFilter, setActiveFilter] = useState('全部');
   const [searchVal, setSearchVal] = useState('');
+  const [page, setPage] = useState(1);
   const [apiRows, setApiRows] = useState<ExtractionCardModel[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -44,15 +47,34 @@ const ExtractionList = ({ onNew, onOpen, refreshKey = 0 }: ExtractionListProps) 
 
   const sourceRows: ExtractionCardModel[] = useApi ? apiRows : (mockExtractions as ExtractionCardModel[]);
 
-  const filtered = sourceRows.filter((e) => {
-    const matchFilter = activeFilter === '全部' || e.tag === activeFilter;
-    const matchSearch =
-      !searchVal ||
-      e.title.includes(searchVal) ||
-      e.sourceCourse.includes(searchVal) ||
-      e.author.includes(searchVal);
-    return matchFilter && matchSearch;
-  });
+  const filtered = useMemo(
+    () =>
+      sourceRows.filter((e) => {
+        const matchFilter = activeFilter === '全部' || e.tag === activeFilter;
+        const matchSearch =
+          !searchVal ||
+          e.title.includes(searchVal) ||
+          e.sourceCourse.includes(searchVal) ||
+          e.author.includes(searchVal);
+        return matchFilter && matchSearch;
+      }),
+    [sourceRows, activeFilter, searchVal],
+  );
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+
+  useEffect(() => {
+    setPage(1);
+  }, [activeFilter, searchVal]);
+
+  useEffect(() => {
+    setPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
+
+  const paginated = useMemo(
+    () => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [filtered, page],
+  );
 
   const totalItems = sourceRows.reduce((s, e) => s + e.itemCount, 0);
   const completedCount = sourceRows.filter((e) => e.progress === 100).length;
@@ -178,11 +200,48 @@ const ExtractionList = ({ onNew, onOpen, refreshKey = 0 }: ExtractionListProps) 
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
-          {filtered.map((extraction) => (
-            <ExtractionCard key={extraction.id} extraction={extraction} onOpen={onOpen} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
+            {paginated.map((extraction) => (
+              <ExtractionCard key={extraction.id} extraction={extraction} onOpen={onOpen} />
+            ))}
+          </div>
+
+          {filtered.length > PAGE_SIZE && (
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-2 border-t border-gray-100">
+              <p className="text-[11px] text-gray-500">
+                共 <span className="font-semibold text-gray-700">{filtered.length}</span> 条记录，每页 {PAGE_SIZE} 条 · 第{' '}
+                <span className="font-semibold text-gray-700">{page}</span> / {totalPages} 页
+              </p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                >
+                  <i className="ri-arrow-left-s-line mr-0.5" />
+                  上一页
+                </button>
+                <button
+                  type="button"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                >
+                  下一页
+                  <i className="ri-arrow-right-s-line ml-0.5" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {filtered.length > 0 && filtered.length <= PAGE_SIZE && (
+            <p className="text-[11px] text-gray-400 pt-1">
+              共 {filtered.length} 条记录
+            </p>
+          )}
+        </>
       )}
     </div>
   );

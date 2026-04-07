@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 
 const MAX_CHARS = 120_000;
 
@@ -31,12 +32,24 @@ async function extractDocx(filePath, originalName) {
 }
 
 // ── PPT .pptx / .ppt / 旧版 .doc ──────────────────────────────────────────
+// officeparser v6+：已移除 parseOfficeAsync，统一使用 parseOffice()，返回 AST，需 .toText() 取纯文本
 async function extractOffice(filePath, originalName) {
   try {
-    const officeParser = await import('officeparser');
-    const parse = officeParser.default?.parseOfficeAsync ?? officeParser.parseOfficeAsync;
-    const text = await parse(filePath, { outputErrorToConsole: false });
-    const result = truncate(text);
+    const mod = await import('officeparser');
+    const parseOffice =
+      mod.parseOffice ??
+      mod.default?.parseOffice;
+    if (typeof parseOffice !== 'function') {
+      throw new Error('officeparser 未导出 parseOffice，请检查依赖版本');
+    }
+    const ast = await parseOffice(filePath, { outputErrorToConsole: false });
+    let raw = '';
+    if (ast && typeof ast.toText === 'function') {
+      raw = ast.toText();
+    } else if (typeof ast === 'string') {
+      raw = ast;
+    }
+    const result = truncate(raw);
     if (!result) return `[Office 文档内容为空: ${originalName}]`;
     return result;
   } catch (e) {
@@ -45,19 +58,63 @@ async function extractOffice(filePath, originalName) {
 }
 
 // ── PDF ─────────────────────────────────────────────────────────────────────
+// pdf-parse@2+ 使用 package.json exports，禁止 deep import（如 lib/pdf-parse.js）。
+// 使用官方导出的 PDFParse + getText()，与 v1 的 (buffer)=>{ text } 不同。
 async function extractPdf(filePath, originalName) {
   try {
-    const { createRequire } = await import('node:module');
-    const require = createRequire(import.meta.url);
-    const pdfParse = require('pdf-parse/lib/pdf-parse.js');
     const buf = fs.readFileSync(filePath);
-    const data = await pdfParse(buf);
-    const text = truncate(data.text);
-    if (!text) return `[PDF 内容为空或为扫描版图片 PDF: ${originalName}]`;
-    return text;
+    const { PDFParse } = await import('pdf-parse');
+    const parser = new PDFParse({ data: buf });
+    try {
+      const result = await parser.getText();
+      const raw = typeof result?.text === 'string' ? result.text : '';
+      const text = truncate(raw.trim());
+      if (!text) return `[PDF 内容为空或为扫描版图片 PDF: ${originalName}]`;
+      return text;
+    } finally {
+      try {
+        await parser.destroy();
+      } catch {
+        /* ignore */
+      }
+    }
   } catch (e) {
     return `[PDF 解析失败（${originalName}）: ${e.message}]`;
   }
+}
+
+// ── Dify audio-to-text 按 MIME 校验类型；无 type 的 Blob 易导致 415 unsupported_audio_type ──
+function mimeFromExt(ext) {
+  const e = (ext || '').toLowerCase();
+  const map = {
+    mp3: 'audio/mpeg',
+    mpga: 'audio/mpeg',
+    mpeg: 'audio/mpeg',
+    wav: 'audio/wav',
+    m4a: 'audio/mp4',
+    aac: 'audio/aac',
+    ogg: 'audio/ogg',
+    flac: 'audio/flac',
+    wma: 'audio/x-ms-wma',
+    mp4: 'audio/mp4',
+    webm: 'audio/webm',
+  };
+  return map[e] || 'audio/mpeg';
+}
+
+/** 优先用磁盘路径扩展名；乱码 originalName 时仍能对上 MIME 与 multipart 文件名。 */
+function resolveAudioExt(filePath, originalName) {
+  let ext = path.extname(filePath).replace(/^\./, '').toLowerCase();
+  if (!ext || !isAudioExt(ext)) {
+    ext = (originalName.split('.').pop() || 'mp3').toLowerCase();
+  }
+  if (!isAudioExt(ext)) ext = 'mp3';
+  return ext;
+}
+
+/** Dify 可能根据 multipart 文件名推断类型；中文乱码名会导致扩展名异常 → 415。改用磁盘扩展名 + ASCII 文件名。 */
+function safeAudioUploadFilename(ext) {
+  return `ke-audio-${Date.now()}.${ext}`;
 }
 
 // ── 音频：调用 Dify audio-to-text → 可选调用精炼工作流 ──────────────────────
@@ -84,9 +141,16 @@ export async function transcribeAudio(filePath, originalName, sessionContext = {
   let rawTranscript = '';
   try {
     const buf = fs.readFileSync(filePath);
-    const blob = new Blob([buf]);
+    const ext = resolveAudioExt(filePath, originalName);
+    const mime = mimeFromExt(ext);
+    const uploadName = safeAudioUploadFilename(ext);
     const form = new FormData();
-    form.append('file', blob, originalName);
+    const FileCtor = globalThis.File;
+    if (typeof FileCtor === 'function') {
+      form.append('file', new FileCtor([buf], uploadName, { type: mime }));
+    } else {
+      form.append('file', new Blob([buf], { type: mime }), uploadName);
+    }
     form.append('user', 'knowledge-extraction');
 
     const res = await fetch(`${v1Root}/audio-to-text`, {

@@ -174,7 +174,13 @@ const KnowledgeExtractionPage = () => {
           {viewMode === 'list' && (
             <ExtractionList onNew={handleNew} onOpen={handleOpen} refreshKey={listRefresh} />
           )}
-          {viewMode === 'workflow' && activeStep === 0 && <SourceAnchorStep onNext={handleAnchorStepNext} />}
+          {viewMode === 'workflow' && activeStep === 0 && (
+            <SourceAnchorStep
+              key={keSessionId ?? 'new'}
+              resumeSessionId={keSessionId}
+              onNext={handleAnchorStepNext}
+            />
+          )}
           {viewMode === 'workflow' && activeStep === 1 && (
             <div className="space-y-4">
               {keAnchorSummary && (

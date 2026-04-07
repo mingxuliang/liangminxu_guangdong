@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react';
-import { keRunRefine, type RefinementResult } from '../../../services/knowledgeExtractionApi';
+import {
+  keGetSession,
+  keRunRefine,
+  type RefinementResult,
+} from '../../../services/knowledgeExtractionApi';
+import { pollRefineUntilSettled } from '../utils/longRunningSession';
 
 interface StructuredRefinementStepProps {
   sessionId: string | null;
@@ -19,20 +24,66 @@ const StructuredRefinementStep = ({ sessionId, onNext, onPrev }: StructuredRefin
 
   useEffect(() => {
     if (!sessionId) return;
-    setLoading(true);
-    setError(null);
-    keRunRefine(sessionId)
-      .then(s => {
-        const r = s.refine_result;
-        if (r && (r.core_knowledge?.length || r.case_materials?.length)) {
-          setResult(r);
-          setIsMock(Boolean(s.refine_error?.startsWith('mock')));
-        } else {
+    const ac = new AbortController();
+    const { signal } = ac;
+
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        let s = await keGetSession(sessionId);
+        if (signal.aborted) return;
+
+        const applyRefine = (sess: typeof s) => {
+          const r = sess.refine_result;
+          if (r && (r.core_knowledge?.length || r.case_materials?.length)) {
+            setResult(r);
+            setIsMock(Boolean(sess.refine_error?.startsWith('mock')));
+            return true;
+          }
+          return false;
+        };
+
+        if (s.refine_status === 'ready') {
+          if (applyRefine(s)) return;
+          setError('结构化提炼返回数据为空，请检查工作流配置');
+          return;
+        }
+        if (s.refine_status === 'failed') {
+          setError(s.refine_error || '结构化提炼失败');
+          return;
+        }
+        if (s.refine_status === 'running') {
+          s = await pollRefineUntilSettled(sessionId, { signal });
+          if (signal.aborted) return;
+          if (applyRefine(s)) return;
+          if (s.refine_status === 'failed') {
+            setError(s.refine_error || '结构化提炼失败');
+            return;
+          }
+          if (s.refine_status === 'running') {
+            setError(
+              '结构化提炼仍在服务端处理中，请稍后点击「重新提炼」或刷新页面；若 Dify 较慢属正常现象。',
+            );
+            return;
+          }
+        }
+
+        s = await keRunRefine(sessionId);
+        if (signal.aborted) return;
+        if (!applyRefine(s)) {
           setError('结构化提炼返回数据为空，请检查工作流配置');
         }
-      })
-      .catch(e => setError(String(e?.message ?? e)))
-      .finally(() => setLoading(false));
+      } catch (e) {
+        const msg = String((e as Error)?.message ?? e);
+        if (msg === 'Aborted') return;
+        setError(msg);
+      } finally {
+        if (!signal.aborted) setLoading(false);
+      }
+    })();
+
+    return () => ac.abort();
   }, [sessionId]);
 
   const tabs: { key: TabKey; label: string; icon: string; count: number }[] = [

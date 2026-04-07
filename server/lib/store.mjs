@@ -57,6 +57,8 @@ export function createSessionRecord(payload) {
     course_title: payload.course_title ?? null,
     material_selection: payload.material_selection ?? { outline: true, ppt: true, script: true },
     extract_goal: payload.extract_goal ?? '',
+    /** 列表卡片标题，与萃取目标独立 */
+    project_name: typeof payload.project_name === 'string' ? payload.project_name : '',
     target_audience: payload.target_audience ?? '',
     use_scenes: Array.isArray(payload.use_scenes) ? payload.use_scenes : ['knowledge-base'],
     extraction_completed: false,

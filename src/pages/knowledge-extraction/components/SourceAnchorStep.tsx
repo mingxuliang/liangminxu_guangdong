@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   isKeApiEnabled,
   keCreateSession,
+  keGetSession,
   kePatchSession,
   keRunAnchor,
   keUploadAsset,
@@ -10,6 +11,8 @@ import {
 
 interface SourceAnchorStepProps {
   onNext: (payload?: { sessionId: string; anchorSummary?: string }) => void;
+  /** 从列表打开或从后续步骤回到 Step1 时传入，复用该会话并回填表单 */
+  resumeSessionId?: string | null;
 }
 
 type LocalFileRow = {
@@ -101,7 +104,7 @@ const materialItems = [
   },
 ];
 
-const SourceAnchorStep = ({ onNext }: SourceAnchorStepProps) => {
+const SourceAnchorStep = ({ onNext, resumeSessionId }: SourceAnchorStepProps) => {
   const useApi = isKeApiEnabled();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionInitError, setSessionInitError] = useState<string | null>(null);
@@ -124,6 +127,7 @@ const SourceAnchorStep = ({ onNext }: SourceAnchorStepProps) => {
   const manualFileRef = useRef<HTMLInputElement>(null);
 
   // Common
+  const [projectName, setProjectName] = useState('');
   const [extractGoal, setExtractGoal] = useState('');
   const [targetAudience, setTargetAudience] = useState('');
   const [useScene, setUseScene] = useState<string[]>(['knowledge-base']);
@@ -131,6 +135,38 @@ const SourceAnchorStep = ({ onNext }: SourceAnchorStepProps) => {
   useEffect(() => {
     if (!useApi) return;
     let cancelled = false;
+
+    if (resumeSessionId) {
+      (async () => {
+        try {
+          const s = await keGetSession(resumeSessionId);
+          if (cancelled) return;
+          setSessionId(s.id);
+          setProjectName(typeof s.project_name === 'string' ? s.project_name : '');
+          setExtractGoal(s.extract_goal ?? '');
+          setTargetAudience(s.target_audience ?? '');
+          if (Array.isArray(s.use_scenes) && s.use_scenes.length) setUseScene(s.use_scenes);
+          if (s.mode === 'course' || s.mode === 'manual') setMode(s.mode);
+          if (s.course_id && courseOptions.some((c) => c.id === s.course_id)) {
+            setSelectedCourse(s.course_id);
+          }
+          const ms = s.material_selection;
+          if (ms && typeof ms === 'object') {
+            setCheckedMaterials({
+              outline: Boolean(ms.outline),
+              ppt: Boolean(ms.ppt),
+              script: Boolean(ms.script),
+            });
+          }
+        } catch (e) {
+          if (!cancelled) setSessionInitError(e instanceof Error ? e.message : String(e));
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
     (async () => {
       try {
         const s = await keCreateSession({
@@ -146,7 +182,7 @@ const SourceAnchorStep = ({ onNext }: SourceAnchorStepProps) => {
     return () => {
       cancelled = true;
     };
-  }, [useApi]);
+  }, [useApi, resumeSessionId]);
 
   useEffect(() => {
     if (!useApi || !sessionId) return;
@@ -296,6 +332,7 @@ const SourceAnchorStep = ({ onNext }: SourceAnchorStepProps) => {
           ppt: Boolean(checkedMaterials.ppt),
           script: Boolean(checkedMaterials.script),
         },
+        project_name: projectName.trim(),
         extract_goal: extractGoal,
         target_audience: targetAudience,
         use_scenes: useScene,
@@ -590,6 +627,23 @@ const SourceAnchorStep = ({ onNext }: SourceAnchorStepProps) => {
             {/* Goal + audience + scenes */}
             <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
               <div>
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <div className="w-5 h-5 flex items-center justify-center">
+                    <i className="ri-bookmark-3-line text-blue-500 text-sm" />
+                  </div>
+                  <span className="text-xs font-bold text-gray-800">项目名称</span>
+                  <span className="text-[10px] text-gray-400">（可选，展示在萃取记录卡片标题）</span>
+                </div>
+                <input
+                  type="text"
+                  value={projectName}
+                  onChange={e => setProjectName(e.target.value)}
+                  placeholder="例如：销售最佳实践萃取 · 2026Q1"
+                  maxLength={80}
+                  className="w-full text-xs text-gray-700 placeholder-gray-300 border border-gray-200 rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all"
+                />
+              </div>
+              <div>
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-5 h-5 flex items-center justify-center">
                     <i className="ri-focus-3-line text-blue-500 text-sm" />
@@ -774,6 +828,23 @@ const SourceAnchorStep = ({ onNext }: SourceAnchorStepProps) => {
             </div>
 
             <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+              <div>
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <div className="w-5 h-5 flex items-center justify-center">
+                    <i className="ri-bookmark-3-line text-blue-500 text-sm" />
+                  </div>
+                  <span className="text-xs font-bold text-gray-800">项目名称</span>
+                  <span className="text-[10px] text-gray-400">（可选，展示在萃取记录卡片标题）</span>
+                </div>
+                <input
+                  type="text"
+                  value={projectName}
+                  onChange={e => setProjectName(e.target.value)}
+                  placeholder="例如：销售最佳实践萃取 · 2026Q1"
+                  maxLength={80}
+                  className="w-full text-xs text-gray-700 placeholder-gray-300 border border-gray-200 rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all"
+                />
+              </div>
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-5 h-5 flex items-center justify-center">

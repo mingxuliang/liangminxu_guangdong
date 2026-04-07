@@ -51,6 +51,7 @@ describe('store.mjs - Session Management', () => {
       expect(session.course_title).toBeNull();
       expect(session.material_selection).toEqual({ outline: true, ppt: true, script: true });
       expect(session.extract_goal).toBe('');
+      expect(session.project_name).toBe('');
       expect(session.target_audience).toBe('');
       expect(session.use_scenes).toEqual(['knowledge-base']);
       expect(session.status).toBe('draft');

@@ -54,6 +54,15 @@ const routes: RouteObject[] = [
       </RequireAuth>
     ),
   },
+  /** 常见误输入：下划线 → 连字符 */
+  {
+    path: "/knowledge_extraction",
+    element: (
+      <RequireAuth>
+        <Navigate to="/knowledge-extraction" replace />
+      </RequireAuth>
+    ),
+  },
   {
     path: "/system/users",
     element: (

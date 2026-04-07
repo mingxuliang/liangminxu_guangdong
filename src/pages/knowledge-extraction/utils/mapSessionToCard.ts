@@ -61,9 +61,16 @@ export function mapSessionToExtractionCard(s: KeSession): ExtractionCardModel {
     passRate = Math.round(vi.reduce((sum, x) => sum + (x.overall ?? 0), 0) / vi.length);
   }
 
+  const pname = (s.project_name || '').trim();
   const goal = (s.extract_goal || '').trim();
-  const titleBase = goal.slice(0, 48) || `知识萃取 · ${s.id.slice(0, 8)}`;
-  const title = goal.length > 48 ? `${goal.slice(0, 48)}…` : titleBase;
+  const picked = pname || goal;
+  const fallbackTitle = `知识萃取 · ${s.id.slice(0, 8)}`;
+  const title =
+    !picked
+      ? fallbackTitle
+      : picked.length > 48
+        ? `${picked.slice(0, 48)}…`
+        : picked;
 
   const src = (s.course_title || '').trim() || goal.slice(0, 40) || '手工上传';
   const sourceCourse = src.length > 40 ? `${src.slice(0, 40)}…` : src;
