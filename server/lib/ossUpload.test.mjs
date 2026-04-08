@@ -143,4 +143,33 @@ describe('ossUpload.mjs - OSS Upload', () => {
       expect(isOssConfigured()).toBe(true);
     });
   });
+
+  describe('OSS key prefix', () => {
+    it('should default to dev prefix outside production', async () => {
+      delete process.env.OSS_PREFIX;
+      process.env.NODE_ENV = 'development';
+
+      const { getOssPrefix, withOssPrefix } = await import('./ossUpload.mjs');
+      expect(getOssPrefix()).toBe('dev');
+      expect(withOssPrefix('knowledge-extraction/test/file.txt')).toBe('dev/knowledge-extraction/test/file.txt');
+    });
+
+    it('should use prod prefix in production when explicit prefix is absent', async () => {
+      delete process.env.OSS_PREFIX;
+      process.env.NODE_ENV = 'production';
+
+      const { getOssPrefix, withOssPrefix } = await import('./ossUpload.mjs');
+      expect(getOssPrefix()).toBe('prod');
+      expect(withOssPrefix('/knowledge-extraction/test/file.txt')).toBe('prod/knowledge-extraction/test/file.txt');
+    });
+
+    it('should prefer explicit OSS_PREFIX', async () => {
+      process.env.OSS_PREFIX = 'devbox';
+      process.env.NODE_ENV = 'production';
+
+      const { getOssPrefix, withOssPrefix } = await import('./ossUpload.mjs');
+      expect(getOssPrefix()).toBe('devbox');
+      expect(withOssPrefix('knowledge-extraction/test/file.txt')).toBe('devbox/knowledge-extraction/test/file.txt');
+    });
+  });
 });

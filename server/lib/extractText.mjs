@@ -1,5 +1,7 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 const MAX_CHARS = 120_000;
 
@@ -17,6 +19,13 @@ export function isAudioExt(ext) {
 
 /** 上传时写入资产的占位文本，anchor/run 时会替换为真实转写内容 */
 export const AUDIO_PENDING = '[AUDIO_PENDING]';
+
+export async function createTempAssetFilePath(originalName, prefix = 'asset') {
+  const ext = path.extname(originalName || '').toLowerCase() || '.tmp';
+  const dir = path.join(os.tmpdir(), 'knowledge-extraction-assets');
+  await fs.promises.mkdir(dir, { recursive: true });
+  return path.join(dir, `${prefix}-${Date.now()}-${randomUUID()}${ext}`);
+}
 
 // ── Word .docx ──────────────────────────────────────────────────────────────
 async function extractDocx(filePath, originalName) {

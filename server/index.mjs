@@ -16,8 +16,9 @@ import fs from 'node:fs';
 import multer from 'multer';
 
 import { runKeAnchorWorkflow, runKeFilterWorkflow, runKeRefineWorkflow, runKeReextractWorkflow, runKeValidationWorkflow } from './lib/difyClient.mjs';
-import { extractTextFromFile, mergeMaterialLines, AUDIO_PENDING, isAudioExt, transcribeAudio } from './lib/extractText.mjs';
-import { isOssConfigured, putLocalFileToOss } from './lib/ossUpload.mjs';
+import { createTempAssetFilePath, extractTextFromFile, mergeMaterialLines, AUDIO_PENDING, isAudioExt, transcribeAudio } from './lib/extractText.mjs';
+import { downloadOssFileToLocal, getOssPrefix, isOssConfigured, putLocalFileToOss } from './lib/ossUpload.mjs';
+import { ensurePostgresSchema, getSessionStoreDriver, isPostgresConfigured } from './lib/db.mjs';
 import { createSessionRecord, listSessions, loadSession, saveSession } from './lib/store.mjs';
 
 const __dirname = _serverDir;
@@ -34,31 +35,48 @@ async function transcribePendingAudioAssets(s) {
   let changed = false;
   for (const asset of s.assets || []) {
     if (asset.extracted_text !== AUDIO_PENDING) continue;
-    if (!asset.path) {
-      asset.extracted_text = `[音频文件已上传至云存储，本地副本不可用，无法自动转写: ${asset.original_name}]`;
-      asset.audio_pending = false;
-      changed = true;
-      continue;
+    let cleanup;
+    let absPath = null;
+    if (asset.path) {
+      const localCandidate = path.join(ROOT, asset.path);
+      if (fs.existsSync(localCandidate)) {
+        absPath = localCandidate;
+      }
     }
-    const absPath = path.join(ROOT, asset.path);
-    if (!fs.existsSync(absPath)) {
-      asset.extracted_text = `[音频本地文件已被移除，无法转写: ${asset.original_name}]`;
+    if (!absPath && asset.storage === 'oss' && asset.oss_key) {
+      const tempPath = await createTempAssetFilePath(asset.original_name, `audio-${s.id}`);
+      await downloadOssFileToLocal({
+        bucket: asset.oss_bucket,
+        objectKey: asset.oss_key,
+        localPath: tempPath,
+      });
+      absPath = tempPath;
+      cleanup = async () => {
+        try { await fs.promises.unlink(tempPath); } catch { /* ignore */ }
+      };
+    }
+    if (!absPath) {
+      asset.extracted_text = `[音频文件暂不可用，无法自动转写: ${asset.original_name}]`;
       asset.audio_pending = false;
       changed = true;
       continue;
     }
     const tag = '[pending-audio]';
     console.log(`${tag} 开始转写: ${asset.original_name} (session=${s.id})`);
-    asset.extracted_text = await transcribeAudio(absPath, asset.original_name, {
-      extract_goal: s.extract_goal || '',
-      course_title: s.course_title || '',
-      target_audience: s.target_audience || '',
-    });
+    try {
+      asset.extracted_text = await transcribeAudio(absPath, asset.original_name, {
+        extract_goal: s.extract_goal || '',
+        course_title: s.course_title || '',
+        target_audience: s.target_audience || '',
+      });
+    } finally {
+      if (cleanup) await cleanup();
+    }
     asset.audio_pending = false;
     changed = true;
     console.log(`${tag} 转写完成: ${asset.original_name} (${String(asset.extracted_text).length} 字)`);
   }
-  if (changed) saveSession(s);
+  if (changed) await saveSession(s);
   return changed;
 }
 
@@ -96,7 +114,10 @@ app.get('/api/health', (_req, res) => {
     ok: true,
     service: 'knowledge-extraction-api',
     time: new Date().toISOString(),
+    session_storage: getSessionStoreDriver(),
+    postgres_configured: isPostgresConfigured(),
     object_storage: isOssConfigured() ? 'configured' : 'local_only',
+    oss_prefix: getOssPrefix(),
     /** 未配置时 Step1 会返回模拟 anchor_package，PDF 解析内容不会发往 Dify */
     ke_anchor_configured: Boolean(process.env.KE_ANCHOR_API_KEY?.trim()),
     dify_base_url: (process.env.DIFY_BASE_URL || '').trim() || '(default http://127.0.0.1:8088/v1)',
@@ -108,31 +129,31 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
-app.post('/api/knowledge-extraction/sessions', (req, res) => {
+app.post('/api/knowledge-extraction/sessions', async (req, res) => {
   try {
-    const session = createSessionRecord(req.body || {});
+    const session = await createSessionRecord(req.body || {});
     res.status(201).json(session);
   } catch (e) {
     res.status(500).json({ error: String(e?.message || e) });
   }
 });
 
-app.get('/api/knowledge-extraction/sessions', (_req, res) => {
+app.get('/api/knowledge-extraction/sessions', async (_req, res) => {
   try {
-    res.json({ sessions: listSessions() });
+    res.json({ sessions: await listSessions() });
   } catch (e) {
     res.status(500).json({ error: String(e?.message || e) });
   }
 });
 
-app.get('/api/knowledge-extraction/sessions/:id', (req, res) => {
-  const s = loadSession(req.params.id);
+app.get('/api/knowledge-extraction/sessions/:id', async (req, res) => {
+  const s = await loadSession(req.params.id);
   if (!s) return res.status(404).json({ error: 'not_found' });
   res.json(s);
 });
 
-app.patch('/api/knowledge-extraction/sessions/:id', (req, res) => {
-  const s = loadSession(req.params.id);
+app.patch('/api/knowledge-extraction/sessions/:id', async (req, res) => {
+  const s = await loadSession(req.params.id);
   if (!s) return res.status(404).json({ error: 'not_found' });
   const b = req.body || {};
   if (b.mode != null) s.mode = b.mode;
@@ -144,7 +165,7 @@ app.patch('/api/knowledge-extraction/sessions/:id', (req, res) => {
   if (b.target_audience !== undefined) s.target_audience = b.target_audience;
   if (b.use_scenes) s.use_scenes = b.use_scenes;
   if (b.extraction_completed !== undefined) s.extraction_completed = Boolean(b.extraction_completed);
-  saveSession(s);
+  await saveSession(s);
   res.json(s);
 });
 
@@ -163,7 +184,7 @@ const upload = multer({
 });
 
 app.post('/api/knowledge-extraction/sessions/:id/assets', upload.single('file'), async (req, res) => {
-  const s = loadSession(req.params.id);
+  const s = await loadSession(req.params.id);
   if (!s) return res.status(404).json({ error: 'not_found' });
   if (!req.file) return res.status(400).json({ error: 'file_required' });
 
@@ -187,9 +208,7 @@ app.post('/api/knowledge-extraction/sessions/:id/assets', upload.single('file'),
   let oss_key;
 
   try {
-    // 音频文件始终保留本地副本（anchor/run 阶段需要读取本地文件做转写）
-    // 非音频文件按正常逻辑上传 OSS
-    if (isOssConfigured() && !isAudio) {
+    if (isOssConfigured()) {
       const up = await putLocalFileToOss({
         localPath: req.file.path,
         objectKey: ossKey,
@@ -225,12 +244,12 @@ app.post('/api/knowledge-extraction/sessions/:id/assets', upload.single('file'),
   };
   s.assets = s.assets || [];
   s.assets.push(asset);
-  saveSession(s);
+  await saveSession(s);
   res.status(201).json(asset);
 });
 
 app.post('/api/knowledge-extraction/sessions/:id/anchor/run', async (req, res) => {
-  const s = loadSession(req.params.id);
+  const s = await loadSession(req.params.id);
   if (!s) return res.status(404).json({ error: 'not_found' });
 
   if (!s.extract_goal?.trim()) {
@@ -243,7 +262,7 @@ app.post('/api/knowledge-extraction/sessions/:id/anchor/run', async (req, res) =
 
   s.status = 'anchoring';
   s.error_message = null;
-  saveSession(s);
+  await saveSession(s);
 
   try {
     await transcribePendingAudioAssets(s);
@@ -276,19 +295,19 @@ app.post('/api/knowledge-extraction/sessions/:id/anchor/run', async (req, res) =
     } else {
       console.log('[anchor/run] 已调用 Dify 源头锚定工作流（非模拟）');
     }
-    saveSession(s);
+    await saveSession(s);
     res.json(s);
   } catch (e) {
     s.status = 'failed';
     s.error_message = String(e?.message || e);
-    saveSession(s);
+    await saveSession(s);
     console.error('[anchor/run] 失败:', s.error_message);
     res.status(500).json({ error: s.error_message, session: s });
   }
 });
 
 app.post('/api/knowledge-extraction/sessions/:id/filter/run', async (req, res) => {
-  const s = loadSession(req.params.id);
+  const s = await loadSession(req.params.id);
   if (!s) return res.status(404).json({ error: 'not_found' });
 
   // 与 anchor/run 一致：先转写待处理音频，再合并 material_bundle（避免仅第二步触发时音频仍是占位）
@@ -300,7 +319,7 @@ app.post('/api/knowledge-extraction/sessions/:id/filter/run', async (req, res) =
 
   s.filter_status = 'running';
   s.filter_error = null;
-  saveSession(s);
+  await saveSession(s);
 
   try {
     const material_bundle_text = mergeMaterialLines(s);
@@ -317,19 +336,19 @@ app.post('/api/knowledge-extraction/sessions/:id/filter/run', async (req, res) =
     s.filter_error = result.mock
       ? 'mock: 未配置 KE_FILTER_API_KEY，返回演示数据'
       : null;
-    saveSession(s);
+    await saveSession(s);
     res.json(s);
   } catch (e) {
     s.filter_status = 'failed';
     s.filter_error = String(e?.message || e);
-    saveSession(s);
+    await saveSession(s);
     console.error('[filter/run] 失败:', s.filter_error);
     res.status(500).json({ error: s.filter_error, session: s });
   }
 });
 
 app.post('/api/knowledge-extraction/sessions/:id/refine/run', async (req, res) => {
-  const s = loadSession(req.params.id);
+  const s = await loadSession(req.params.id);
   if (!s) return res.status(404).json({ error: 'not_found' });
 
   if (!s.filter_items || s.filter_items.length === 0) {
@@ -338,7 +357,7 @@ app.post('/api/knowledge-extraction/sessions/:id/refine/run', async (req, res) =
 
   s.refine_status = 'running';
   s.refine_error = null;
-  saveSession(s);
+  await saveSession(s);
 
   try {
     const selectedItems = (s.filter_items || []).filter(item => item.selected !== false);
@@ -355,19 +374,19 @@ app.post('/api/knowledge-extraction/sessions/:id/refine/run', async (req, res) =
     s.refine_error = result.mock
       ? 'mock: 未配置 KE_REFINE_API_KEY，返回演示数据'
       : null;
-    saveSession(s);
+    await saveSession(s);
     res.json(s);
   } catch (e) {
     s.refine_status = 'failed';
     s.refine_error = String(e?.message || e);
-    saveSession(s);
+    await saveSession(s);
     console.error('[refine/run] 失败:', s.refine_error);
     res.status(500).json({ error: s.refine_error, session: s });
   }
 });
 
 app.post('/api/knowledge-extraction/sessions/:id/reextract', async (req, res) => {
-  const s = loadSession(req.params.id);
+  const s = await loadSession(req.params.id);
   if (!s) return res.status(404).json({ error: 'not_found' });
 
   const { item_title, item_content, item_type } = req.body || {};
@@ -394,7 +413,7 @@ app.post('/api/knowledge-extraction/sessions/:id/reextract', async (req, res) =>
 });
 
 app.post('/api/knowledge-extraction/sessions/:id/validate/run', async (req, res) => {
-  const s = loadSession(req.params.id);
+  const s = await loadSession(req.params.id);
   if (!s) return res.status(404).json({ error: 'not_found' });
 
   const { structured_result } = req.body || {};
@@ -414,7 +433,7 @@ app.post('/api/knowledge-extraction/sessions/:id/validate/run', async (req, res)
     // 持久化评估结果到 session
     s.validation_items = result.validation_items;
     s.validation_mock = result.mock;
-    saveSession(s);
+    await saveSession(s);
 
     res.json({
       session_id: s.id,
@@ -426,6 +445,8 @@ app.post('/api/knowledge-extraction/sessions/:id/validate/run', async (req, res)
     res.status(500).json({ error: String(e?.message || e) });
   }
 });
+
+await ensurePostgresSchema();
 
 /** 生产/Devbox：构建前端后由本进程托管 out/ */
 const serveStatic = process.env.SERVE_STATIC === '1' || process.env.NODE_ENV === 'production';
