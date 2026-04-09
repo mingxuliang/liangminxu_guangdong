@@ -448,14 +448,56 @@ app.post('/api/knowledge-extraction/sessions/:id/validate/run', async (req, res)
 
 await ensurePostgresSchema();
 
+/**
+ * 生产/Devbox：与 vite.config.ts 中 /islide-api 代理一致，转发到阿里云市场 iSlide。
+ * 前端第五步调用同源的 `/islide-api/generate_ppt`（见 marketplaceGenerate.ts），构建后无 Vite 代理时必须由此转发。
+ */
+const islideUpstream = (process.env.ISLIDE_PROXY_TARGET || 'https://islide.market.alicloudapi.com').replace(/\/$/, '');
+app.use('/islide-api', async (req, res) => {
+  const u = new URL(req.originalUrl, 'http://localhost');
+  const subPath = u.pathname.replace(/^\/islide-api(\/|$)/, '/') || '/';
+  const targetUrl = `${islideUpstream}${subPath === '/' ? '' : subPath}${u.search}`;
+  try {
+    const hasBody = !['GET', 'HEAD'].includes(req.method);
+    const upstream = await fetch(targetUrl, {
+      method: req.method,
+      headers: {
+        'Content-Type': req.headers['content-type'] || 'application/json; charset=UTF-8',
+        ...(req.headers.authorization ? { Authorization: String(req.headers.authorization) } : {}),
+      },
+      body: hasBody ? JSON.stringify(req.body ?? {}) : undefined,
+    });
+    res.status(upstream.status);
+    const ct = upstream.headers.get('content-type');
+    if (ct) res.setHeader('Content-Type', ct);
+    if (!upstream.body) {
+      res.end();
+      return;
+    }
+    const reader = upstream.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) res.write(Buffer.from(value));
+    }
+    res.end();
+  } catch (e) {
+    console.error('[islide-api proxy] 失败:', String(e?.message || e));
+    res.status(502).json({ error: String(e?.message || e) });
+  }
+});
+
 /** 生产/Devbox：构建前端后由本进程托管 out/ */
 const serveStatic = process.env.SERVE_STATIC === '1' || process.env.NODE_ENV === 'production';
 const outDir = path.join(ROOT, 'out');
 if (serveStatic && fs.existsSync(outDir)) {
   app.use(express.static(outDir));
-  app.get(/^(?!\/api).*/, (_req, res) => {
+  app.get(/^(?!\/api)(?!\/islide-api)/, (_req, res) => {
     res.sendFile(path.join(outDir, 'index.html'));
   });
+} else if (serveStatic && !fs.existsSync(outDir)) {
+  // eslint-disable-next-line no-console
+  console.warn('[ke-api] SERVE_STATIC 已开启但缺少 out/，请先执行 npm run build');
 }
 
 app.listen(PORT, '0.0.0.0', () => {

@@ -4,52 +4,24 @@
 
 - **前端**：Vite 构建产物在 `out/`。
 - **后端**：`server/index.mjs`（Express），提供 `/api/knowledge-extraction/*`。
-- **会话存储**：支持 `file` 与 `postgres` 两种模式。生产环境建议配置 `KE_STORAGE_DRIVER=postgres`，会话与资源元数据落 PostgreSQL；未配置时回退到 `server/data/`。
-- **对象存储**：若配置 **Sealos 对象存储**（`OSS_*` 环境变量），上传文件写入存储桶；音频在转写时临时下载到本地缓存后立即删除。未配置时仍暂存 `server/uploads/`。
-- **Dify**：导入 `dify/ke-01-source-anchor.dsl.yml`，配置模型后发布；将 **Workflow API Key** 写入环境变量 `KE_ANCHOR_API_KEY`，`DIFY_BASE_URL` 指向可访问的 Dify `/v1` 根路径。
+- **同源代理**：生产环境由 Node 转发 `/islide-api/*` → 阿里云市场 iSlide（与 `vite.config.ts` 开发代理一致），保证「课程创建」第五步 `generate_ppt` 在 Devbox 上可用。
+- **会话存储**：`KE_STORAGE_DRIVER=postgres` 时会话落 PostgreSQL；未配置则回退 `server/data/`。
+- **对象存储**：配置 `OSS_*` 时上传走 Sealos S3；否则使用 `server/uploads/`。
+- **Dify**：知识萃取工作流见 `dify/*.dsl.yml`；`DIFY_BASE_URL` 须以 `/v1` 结尾。
 
-## 本地开发（Windows / Mac）
+## 环境变量：构建时 vs 运行时
 
-1. 复制 `.env.example` 为 `.env.local`，至少设置 `VITE_API_BASE=/api`。
-2. 根目录创建 `.env`（与 `dotenv` 加载一致），配置 `KE_ANCHOR_API_KEY`（可选，不配则返回模拟锚定包）。
-3. 安装依赖：`npm install`。
-4. 同时启动 API 与前端：`npm run dev:full`（或两个终端分别 `npm run server` 与 `npm run dev`）。
-5. 浏览器访问控制台打印的 Vite 地址（默认端口见 `vite.config.ts`）。
+| 类型 | 说明 |
+|------|------|
+| **构建时（`VITE_*`）** | 由 Vite 打进前端 JS，**必须在执行 `npm run build` 前**注入到环境（Devbox「构建阶段环境变量」或 `export` 后再 build）。 |
+| **运行时** | 由 Node 在启动时读取（`dotenv` / 平台「运行环境变量」），含 `DIFY_BASE_URL`、`KE_*`、`PG*`、`OSS_*`、`ISLIDE_PROXY_TARGET` 等。 |
 
-## Devbox 上部署（单进程托管静态站 + API）
+完整模板见仓库根目录 **`devbox.env.example`**（无真实密钥，可对照 Devbox 控制台逐项填写）。
 
-1. 在 Devbox 中拉取代码，执行 `npm install`。
-2. 在平台环境变量中至少配置：
+## Devbox 推荐步骤
 
-```env
-SERVER_PORT=8787
-KE_STORAGE_DRIVER=postgres
-DIFY_BASE_URL=http://your-dify-host/v1
-KE_ANCHOR_API_KEY=...
-
-# PostgreSQL（Devbox 内推荐内网地址）
-PGHOST=dify-db-postgresql.ns-xook3wzu.svc
-PGPORT=5432
-PGDATABASE=postgres
-PGUSER=postgres
-PGPASSWORD=your-password
-DATABASE_SSL=0
-
-# Sealos Object Storage（Devbox 内推荐 Internal，开发机推荐 External）
-OSS_ENDPOINT=http://object-storage.objectstorage-system.svc
-OSS_ACCESS_KEY_ID=your-access-key
-OSS_SECRET_ACCESS_KEY=your-secret-key
-OSS_BUCKET=your-bucket
-OSS_REGION=us-east-1
-OSS_PREFIX=prod
-OSS_FORCE_PATH_STYLE=1
-```
-
-说明：
-
-- **Devbox / 集群内** 优先用 PostgreSQL 和对象存储的 **Internal** 地址。
-- **本机开发 / 外网调试** 再使用 **External** 地址。
-- `OSS_PREFIX` 建议按环境区分，如 `dev` / `prod`，避免共用桶时数据混写。
+1. 拉取代码后安装依赖：`npm ci` 或 `npm install`。
+2. 在平台配置 **构建阶段** 与 **运行阶段** 环境变量（至少包含 `devbox.env.example` 中全部 `VITE_*` 与数据库、OSS、Dify 密钥）。**勿将密钥提交到 Git。**
 3. 构建并启动：
 
 ```bash
@@ -57,12 +29,59 @@ npm run build
 npm run start:app
 ```
 
-`start:app` 会设置 `NODE_ENV=production` 与 `SERVE_STATIC=1`，由 **同一 Node 进程** 提供 `out/` 静态资源与 `/api` 接口（见 `server/index.mjs`）。
+`start:app` 会设置 `NODE_ENV=production` 与 `SERVE_STATIC=1`，由 **同一 Node 进程** 托管 `out/` 静态资源、`/api` 与 `/islide-api` 代理。
 
-4. 将 Sealos / Devbox **对外端口** 指向 `SERVER_PORT`（默认 `8787`，若平台注入 `PORT` 可改脚本使用 `process.env.PORT`）。
+4. **监听端口**：`server/index.mjs` 使用 `process.env.PORT || process.env.SERVER_PORT || 8787`。若平台注入 `PORT`，请把 **对外端口** 与该值对齐。
+5. 部署后访问：`GET /api/health`，确认 `session_storage`、`postgres_configured`、`object_storage`、`oss_prefix` 符合预期。
+
+## 最小运行时变量（知识萃取）
+
+```env
+KE_STORAGE_DRIVER=postgres
+DIFY_BASE_URL=http://your-dify-host/v1
+KE_ANCHOR_API_KEY=...
+KE_FILTER_API_KEY=...
+KE_REFINE_API_KEY=...
+KE_REEXTRACT_API_KEY=...
+KE_VALIDATION_API_KEY=...
+# 音频：建议配置 SILICONFLOW_API_KEY 或 KE_AUDIO_TO_TEXT_API_KEY / KE_ANCHOR_API_KEY 回退
+
+PGHOST=dify-db-postgresql.ns-xook3wzu.svc
+PGPORT=5432
+PGDATABASE=postgres
+PGUSER=postgres
+PGPASSWORD=...
+DATABASE_SSL=0
+
+OSS_ENDPOINT=http://object-storage.objectstorage-system.svc
+OSS_ACCESS_KEY_ID=...
+OSS_SECRET_ACCESS_KEY=...
+OSS_BUCKET=...
+OSS_REGION=us-east-1
+OSS_PREFIX=prod
+OSS_FORCE_PATH_STYLE=1
+```
+
+## 构建阶段变量（课程创建 + 同源 API）
+
+在 **`npm run build` 之前** 设置，例如：
+
+```env
+VITE_API_BASE=/api
+VITE_DIFY_BASE_URL=http://your-dify-host:8088/v1
+VITE_DIFY_STEP1_API_KEY=...
+VITE_DIFY_STEP1_APP_MODE=workflow
+VITE_DIFY_STEP2A_API_KEY=...
+VITE_DIFY_STEP2B_API_KEY=...
+VITE_DIFY_STEP3_API_KEY=...
+VITE_DIFY_STEP4_API_KEY=...
+VITE_ISLIDE_APPCODE=...
+```
+
+第五步 iSlide 请求发往同源 `/islide-api/generate_ppt`；服务端通过 `ISLIDE_PROXY_TARGET`（默认 `https://islide.market.alicloudapi.com`）转发。
 
 ## 生产建议
 
-- 用 `GET /api/health` 检查 `session_storage`、`postgres_configured`、`object_storage`、`oss_prefix` 是否符合预期。
-- `KE_ANCHOR_API_KEY` 等服务端密钥仅放后端环境变量，勿写入前端构建环境。
-- 若本地和生产共用同一 PostgreSQL / 存储桶，至少要分数据库或分 `OSS_PREFIX`。
+- `KE_*`、`SILICONFLOW_API_KEY`、`PGPASSWORD`、`OSS_*` 等仅放 **服务端/构建机密存储**，勿写入可被公开的仓库文件。
+- 若本地与生产共用同一 PostgreSQL 或桶，请分库或区分 `OSS_PREFIX`。
+- 若 `SERVE_STATIC=1` 但尚未执行 `npm run build`，进程会告警且无法提供页面；请先构建生成 `out/`。
