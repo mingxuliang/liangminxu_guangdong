@@ -4,7 +4,7 @@
     "scripts": {
       "install": "npm ci",
       "build": "npm run build",
-      "start": "npm run preview:prod"
+      "start": "npm run start:app"
     }
   }
 }
