@@ -18,6 +18,7 @@ interface KnowledgeItemForExport {
   kind?: 'core' | 'case' | 'tool';
   type: string;
   title: string;
+  content: string;
   v1Content: string;
   v2Content: string;
   tags: string[];

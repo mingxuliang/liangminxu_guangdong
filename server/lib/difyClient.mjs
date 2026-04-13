@@ -90,6 +90,97 @@ function normalizeWorkflowOutputs(outputs) {
   return merged;
 }
 
+function isJsonLikeQuoteChar(ch) {
+  return ch === '"' || ch === '“' || ch === '”' || ch === '‘' || ch === '’';
+}
+
+function nextSignificantChar(text, startIdx) {
+  for (let i = startIdx + 1; i < text.length; i++) {
+    const ch = text[i];
+    if (!/\s/.test(ch)) return ch;
+  }
+  return '';
+}
+
+/**
+ * 将 LLM 常见的“智能引号 JSON”修正为标准 JSON 引号，仅在疑似 JSON 分隔场景下把它们当作字符串边界。
+ * 例如： "title": “光华智企”智能体岗位化价值交付方法论"
+ */
+function normalizeJsonLikeQuotes(chunk) {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  let delimiter = '';
+
+  for (let i = 0; i < chunk.length; i++) {
+    const ch = chunk[i];
+
+    if (!inString) {
+      if (isJsonLikeQuoteChar(ch)) {
+        inString = true;
+        delimiter = ch;
+        out += '"';
+        continue;
+      }
+      out += ch;
+      continue;
+    }
+
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+
+    if (ch === '\\') {
+      out += ch;
+      escaped = true;
+      continue;
+    }
+
+    const nextSig = nextSignificantChar(chunk, i);
+    const likelyClosing =
+      nextSig === '' || nextSig === ':' || nextSig === ',' || nextSig === '}' || nextSig === ']';
+    const closesAscii = ch === '"';
+    const closesSmart =
+      (delimiter === '“' && ch === '”') ||
+      (delimiter === '‘' && ch === '’') ||
+      (delimiter === '”' && ch === '”') ||
+      (delimiter === '’' && ch === '’');
+
+    if (
+      (delimiter === '"' && closesAscii) ||
+      (delimiter !== '"' && likelyClosing && (closesAscii || closesSmart))
+    ) {
+      out += '"';
+      inString = false;
+      delimiter = '';
+      continue;
+    }
+
+    if (ch === '\n') {
+      out += '\\n';
+      continue;
+    }
+    if (ch === '\r') {
+      out += '\\r';
+      continue;
+    }
+    if (ch === '\t') {
+      out += '\\t';
+      continue;
+    }
+    if (ch === '"') {
+      out += '\\"';
+      continue;
+    }
+
+    out += ch;
+  }
+
+  return out;
+}
+
 function escapeControlCharsInJsonStrings(chunk) {
   let out = '';
   let inString = false;
@@ -139,24 +230,32 @@ function escapeControlCharsInJsonStrings(chunk) {
 
 function parseJsonLenient(chunk) {
   const c = chunk.trim();
-  try {
-    return JSON.parse(c);
-  } catch {
+  const normalizedQuotes = normalizeJsonLikeQuotes(c);
+  const candidates = [
+    c,
+    c.replace(/,\s*([\]}])/g, '$1'),
+    normalizedQuotes,
+    normalizedQuotes.replace(/,\s*([\]}])/g, '$1'),
+  ];
+
+  for (const candidate of candidates) {
     try {
-      return JSON.parse(c.replace(/,\s*([\]}])/g, '$1'));
+      return JSON.parse(candidate);
     } catch {
-      const escaped = escapeControlCharsInJsonStrings(c);
-      try {
-        return JSON.parse(escaped);
-      } catch {
-        try {
-          return JSON.parse(escaped.replace(/,\s*([\]}])/g, '$1'));
-        } catch {
-          throw new Error('JSON parse failed');
-        }
-      }
+      /* continue */
     }
   }
+
+  const escaped = escapeControlCharsInJsonStrings(normalizedQuotes);
+  for (const candidate of [escaped, escaped.replace(/,\s*([\]}])/g, '$1')]) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      /* continue */
+    }
+  }
+
+  throw new Error('JSON parse failed');
 }
 
 /** 将 Dify 工作流 outputs.knowledge_items（字符串或已解析值）转为 knowledge_items 数组 */

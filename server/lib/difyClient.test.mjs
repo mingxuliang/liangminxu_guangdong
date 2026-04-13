@@ -415,4 +415,50 @@ describe('difyClient.mjs - Dify Workflow Client', () => {
       expect(result.anchor_package.downstream_hints).toBeDefined();
     });
   });
+
+  describe('runKeFilterWorkflow - malformed JSON recovery', () => {
+    it('should parse knowledge_items string when a value starts with a smart quote', async () => {
+      process.env.DIFY_BASE_URL = 'http://127.0.0.1:8088/v1';
+      process.env.KE_FILTER_API_KEY = 'test-filter-key';
+
+      difyClient = await import('./difyClient.mjs');
+
+      const malformedKnowledgeItems = `[
+  {
+    "id": "k7",
+    "type": "explicit",
+    "knowledge_form": "方法论",
+    "category": "智能体产品规划",
+    "title": “光华智企”智能体岗位化价值交付方法论",
+    "content": "这是将AI能力精准对接到企业不同层级岗位，实现价值有效交付的产品与服务设计方法论。",
+    "structured_body": "1. 面向一线员工。\\n2. 面向中层管理。\\n3. 面向高层决策。",
+    "source": "PPT第34页",
+    "priority": "high",
+    "reusable": true,
+    "selected": true
+  }
+]`;
+
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        text: async () => JSON.stringify({
+          data: {
+            status: 'succeeded',
+            outputs: { knowledge_items: malformedKnowledgeItems },
+          },
+        }),
+      });
+      global.fetch = mockFetch;
+
+      const result = await difyClient.runKeFilterWorkflow({ extract_goal: 'test' });
+
+      expect(result.mock).toBe(false);
+      expect(result.knowledge_items).toHaveLength(1);
+      expect(result.knowledge_items[0].id).toBe('k7');
+      expect(result.knowledge_items[0].title).toContain('智能体岗位化价值交付方法论');
+      expect(result.knowledge_items[0].title).not.toContain('AI返回内容解析失败');
+
+      delete process.env.KE_FILTER_API_KEY;
+    });
+  });
 });

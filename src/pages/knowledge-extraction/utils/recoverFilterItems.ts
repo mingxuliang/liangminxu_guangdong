@@ -44,6 +44,81 @@ function escapeControlCharsInJsonStrings(chunk: string): string {
   return out;
 }
 
+function isJsonLikeQuoteChar(ch: string): boolean {
+  return ch === '"' || ch === '“' || ch === '”' || ch === '‘' || ch === '’';
+}
+
+function nextSignificantChar(text: string, startIdx: number): string {
+  for (let i = startIdx + 1; i < text.length; i++) {
+    const ch = text[i];
+    if (!/\s/.test(ch)) return ch;
+  }
+  return '';
+}
+
+function normalizeJsonLikeQuotes(chunk: string): string {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  let delimiter = '';
+
+  for (let i = 0; i < chunk.length; i++) {
+    const ch = chunk[i];
+
+    if (!inString) {
+      if (isJsonLikeQuoteChar(ch)) {
+        inString = true;
+        delimiter = ch;
+        out += '"';
+        continue;
+      }
+      out += ch;
+      continue;
+    }
+
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+
+    if (ch === '\\') {
+      out += ch;
+      escaped = true;
+      continue;
+    }
+
+    const nextSig = nextSignificantChar(chunk, i);
+    const likelyClosing =
+      nextSig === '' || nextSig === ':' || nextSig === ',' || nextSig === '}' || nextSig === ']';
+    const closesAscii = ch === '"';
+    const closesSmart =
+      (delimiter === '“' && ch === '”') ||
+      (delimiter === '‘' && ch === '’') ||
+      (delimiter === '”' && ch === '”') ||
+      (delimiter === '’' && ch === '’');
+
+    if (
+      (delimiter === '"' && closesAscii) ||
+      (delimiter !== '"' && likelyClosing && (closesAscii || closesSmart))
+    ) {
+      out += '"';
+      inString = false;
+      delimiter = '';
+      continue;
+    }
+
+    if (ch === '\n') { out += '\\n'; continue; }
+    if (ch === '\r') { out += '\\r'; continue; }
+    if (ch === '\t') { out += '\\t'; continue; }
+    if (ch === '"') { out += '\\"'; continue; }
+
+    out += ch;
+  }
+
+  return out;
+}
+
 function extractFirstJsonArray(s: string): string | null {
   const start = s.indexOf('[');
   if (start === -1) return null;
@@ -67,7 +142,13 @@ function extractFirstJsonArray(s: string): string | null {
 
 function lenientParseArray(chunk: string): unknown[] | null {
   const stripped = chunk.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-  const candidates = [stripped, stripped.replace(/,\s*([\]}])/g, '$1')];
+  const normalizedQuotes = normalizeJsonLikeQuotes(stripped);
+  const candidates = [
+    stripped,
+    stripped.replace(/,\s*([\]}])/g, '$1'),
+    normalizedQuotes,
+    normalizedQuotes.replace(/,\s*([\]}])/g, '$1'),
+  ];
   for (const c of candidates) {
     try {
       const p = JSON.parse(c);
@@ -75,7 +156,7 @@ function lenientParseArray(chunk: string): unknown[] | null {
       if (p && typeof p === 'object' && Array.isArray(p.knowledge_items)) return p.knowledge_items;
     } catch { /* continue */ }
   }
-  const escaped = escapeControlCharsInJsonStrings(stripped);
+  const escaped = escapeControlCharsInJsonStrings(normalizedQuotes);
   const arr = extractFirstJsonArray(escaped);
   if (arr) {
     try {
